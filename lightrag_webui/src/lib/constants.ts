@@ -119,6 +119,26 @@ export const EDGE_PERF_LIMIT = 5000
 // with graph size, capped so huge graphs don't run unbounded.
 export const workerBudgetMs = (order: number): number => Math.min(1500 + order / 10, 10000)
 
+// --- 3D force-graph (react-force-graph + three + d3-force-3d) ----------------
+// Lower alpha decay → simulation runs longer → newly added nodes drift in more
+// gently instead of snapping. Velocity decay damps oscillation.
+export const FG3D_D3_ALPHA_DECAY = 0.02
+export const FG3D_D3_VELOCITY_DECAY = 0.3
+export const FG3D_COOLDOWN_TICKS = 150
+export const FG3D_NODE_REL_SIZE = 3
+export const FG3D_LINK_WIDTH = 1
+// Above this node count, 3D labels are turned off (SpriteText per node is
+// expensive); 2D sigma stays the better choice for very large graphs.
+export const FG3D_NODE_PERF_LIMIT = 5000
+
+// --- Incremental build polling ----------------------------------------------
+// Interval between GET /graphs polls while the pipeline is busy. Backed by no
+// SSE/WebSocket on the server, polling is the only way to see new entities.
+export const INCREMENTAL_POLL_INTERVAL_MS = 2500
+// Stop polling after this many consecutive polls with no new nodes AND
+// pipeline busy === false, confirming the build has converged.
+export const INCREMENTAL_NO_CHANGE_STOP_THRESHOLD = 2
+
 // One-time system-suggested user prompts, injected once into userPromptHistory
 // (for both fresh installs and upgrades). See settings store version 20 migration.
 export const suggestedUserPrompts: string[] = [

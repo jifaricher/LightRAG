@@ -51,6 +51,13 @@ const GraphControl = ({ disableHoverEffect }: { disableHoverEffect?: boolean }) 
   // the instance and re-runs the bind effect with the SAME graph).
   const laidOutGraphRef = useRef<unknown>(null)
 
+  // Tracks which sigmaGraph has been bound to the current sigma instance via
+  // sigma.setGraph(). The edge-size effect and other graph-mutation effects
+  // must NOT fire before the graph is bound — sigma's edge renderers are only
+  // initialized inside setGraph(), so calling updateEachEdgeAttributes +
+  // sigma.refresh() before binding throws "edge can't be repaint".
+  const boundGraphRef = useRef<unknown>(null)
+
   // Last (sigma instance, curved decision) the edge-type effect applied. A
   // rebuild (theme toggle / edge-events gating) creates a fresh sigma whose
   // defaultEdgeType reverts to its construction default ('rect'), so we must
@@ -75,6 +82,7 @@ const GraphControl = ({ disableHoverEffect }: { disableHoverEffect?: boolean }) 
     try {
       if (typeof sigma.setGraph === 'function') {
         sigma.setGraph(sigmaGraph as unknown as AbstractGraph<NodeType, EdgeType>)
+        boundGraphRef.current = sigmaGraph
         console.log('Binding graph to sigma instance')
       } else {
         console.error('Sigma missing setGraph function')
@@ -326,7 +334,12 @@ const GraphControl = ({ disableHoverEffect }: { disableHoverEffect?: boolean }) 
    * instead of one event-emitting setEdgeAttribute per edge.
    */
   useEffect(() => {
-    if (sigma && sigmaGraph) {
+    // Guard: only run after the graph has been bound to sigma via setGraph().
+    // The 2D↔3D mode switch can trigger a double-bind race (old graph → new
+    // graph) where sigma's edge renderers are stale between the two setGraph()
+    // calls. Wrap in try/catch so the crash doesn't take down GraphControl;
+    // the next legitimate binding + refresh will recompute edge sizes.
+    if (sigma && sigmaGraph && boundGraphRef.current === sigmaGraph) {
       const graph = sigma.getGraph()
 
       let minWeight = Number.MAX_SAFE_INTEGER
@@ -341,20 +354,25 @@ const GraphControl = ({ disableHoverEffect }: { disableHoverEffect?: boolean }) 
 
       const weightRange = maxWeight - minWeight
       const sizeScale = maxEdgeSize - minEdgeSize
-      graph.updateEachEdgeAttributes(
-        (_edge, attr) => {
-          if (weightRange > 0) {
-            const weight = typeof attr.originalWeight === 'number' ? attr.originalWeight : 1
-            attr.size = minEdgeSize + sizeScale * Math.pow((weight - minWeight) / weightRange, 0.5)
-          } else {
-            attr.size = minEdgeSize
-          }
-          return attr
-        },
-        { attributes: ['size'] }
-      )
+      try {
+        graph.updateEachEdgeAttributes(
+          (_edge, attr) => {
+            if (weightRange > 0) {
+              const weight = typeof attr.originalWeight === 'number' ? attr.originalWeight : 1
+              attr.size = minEdgeSize + sizeScale * Math.pow((weight - minWeight) / weightRange, 0.5)
+            } else {
+              attr.size = minEdgeSize
+            }
+            return attr
+          },
+          { attributes: ['size'] }
+        )
 
-      sigma.refresh()
+        sigma.refresh()
+      } catch {
+        // sigma's edge renderers not yet initialized for this graph (race
+        // during mode switch). The next binding + refresh will fix sizes.
+      }
     }
   }, [sigma, sigmaGraph, minEdgeSize, maxEdgeSize])
 

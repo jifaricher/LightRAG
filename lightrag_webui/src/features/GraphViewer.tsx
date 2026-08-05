@@ -12,6 +12,8 @@ import {
 } from 'sigma/rendering'
 import { NodeBorderProgram } from '@sigma/node-border'
 import { EdgeCurvedArrowProgram, createEdgeCurveProgram } from '@sigma/edge-curve'
+import { useTranslation } from 'react-i18next'
+import { Box, Layers } from 'lucide-react'
 
 import FocusOnNode from '@/components/graph/FocusOnNode'
 import LayoutsControl from '@/components/graph/LayoutsControl'
@@ -26,11 +28,14 @@ import PropertiesView from '@/components/graph/PropertiesView'
 import SettingsDisplay from '@/components/graph/SettingsDisplay'
 import Legend from '@/components/graph/Legend'
 import LegendButton from '@/components/graph/LegendButton'
+import Button from '@/components/ui/Button'
+
+import GraphViewer3D from '@/features/GraphViewer3D'
 
 import { useSettingsStore } from '@/stores/settings'
 import { useGraphStore } from '@/stores/graph'
 import useIsDarkMode from '@/hooks/useIsDarkMode'
-import { labelColorDarkTheme, labelColorLightTheme, edgeColorDarkTheme, EDGE_PERF_LIMIT } from '@/lib/constants'
+import { labelColorDarkTheme, labelColorLightTheme, edgeColorDarkTheme, EDGE_PERF_LIMIT, controlButtonVariant } from '@/lib/constants'
 
 import '@react-sigma/core/lib/style.css'
 import '@react-sigma/graph-search/lib/style.css'
@@ -143,6 +148,7 @@ const GraphEvents = () => {
 }
 
 const GraphViewer = () => {
+  const { t } = useTranslation()
   const sigmaRef = useRef<any>(null)
   const prevTheme = useRef<string>('')
 
@@ -159,6 +165,8 @@ const GraphViewer = () => {
   const theme = useSettingsStore.use.theme()
   const enableEdgeEvents = useSettingsStore.use.enableEdgeEvents()
   const graphEdgeCount = useGraphStore.use.graphEdgeCount()
+  const graphViewMode = useSettingsStore.use.graphViewMode()
+  const setGraphViewMode = useSettingsStore.use.setGraphViewMode()
 
   // Edge events are disabled above EDGE_PERF_LIMIT regardless of the user
   // setting: the picking buffer renders edges to an extra frame buffer every
@@ -250,10 +258,38 @@ const GraphViewer = () => {
     [selectedNode]
   )
 
+  // 3D mode renders a completely separate viewer (react-force-graph). The 2D
+  // SigmaContainer is unmounted so its WebGL context is freed; GraphViewer3D
+  // owns its own data hooks (useLightragGraph3D, useIncrementalGraph). The
+  // 2D/3D toggle lives inside each viewer's left control column.
+  //
+  // When switching to 3D, reset the 2D fetch state so that switching back
+  // re-fetches and re-binds the graph cleanly. Without this, the stale
+  // sigmaGraph (bound to the destroyed sigma instance) causes
+  // "edge can't be repaint" crashes in GraphControl on remount.
+  // We null sigmaGraph (but keep rawGraph) so GraphControl's binding effect
+  // won't fire prematurely on the old graph when returning to 2D.
+  useEffect(() => {
+    if (graphViewMode === '3d') {
+      const state = useGraphStore.getState()
+      state.setSigmaGraph(null)
+      state.setGraphDataFetchAttempted(false)
+    }
+  }, [graphViewMode])
+
+  if (graphViewMode === '3d') {
+    return <GraphViewer3D />
+  }
+
+  // Key forces SigmaContainer + all children (useLightragGraph, GraphControl)
+  // to fully remount when returning from 3D, avoiding stale sigma bindings.
+  const sigmaKey = `2d-${graphViewMode}`
+
   // Always render SigmaContainer but control its visibility with CSS
   return (
     <div className="relative h-full w-full overflow-hidden">
       <SigmaContainer
+        key={sigmaKey}
         settings={memoizedSigmaSettings}
         className="!bg-background !size-full overflow-hidden"
         ref={sigmaRef}
@@ -281,6 +317,23 @@ const GraphViewer = () => {
           <FullScreenControl />
           <LegendButton />
           <Settings />
+          {/* 2D/3D view toggle */}
+          <Button
+            variant={graphViewMode === '2d' ? 'secondary' : controlButtonVariant}
+            size="icon"
+            onClick={() => setGraphViewMode('2d')}
+            tooltip={t('graphPanel.viewMode.2d', '2D View')}
+          >
+            <Layers />
+          </Button>
+          <Button
+            variant={graphViewMode === '3d' ? 'secondary' : controlButtonVariant}
+            size="icon"
+            onClick={() => setGraphViewMode('3d')}
+            tooltip={t('graphPanel.viewMode.3d', '3D View')}
+          >
+            <Box />
+          </Button>
           {/* <ThemeToggle /> */}
         </div>
 

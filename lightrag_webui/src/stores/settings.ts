@@ -7,6 +7,7 @@ import { Message, QueryRequest } from '@/api/lightrag'
 type Theme = 'dark' | 'light' | 'system'
 type Language = 'en' | 'zh' | 'fr' | 'ar' | 'zh_TW' | 'ru' | 'ja' | 'de' | 'uk' | 'ko' | 'vi'
 type Tab = 'documents' | 'knowledge-graph' | 'retrieval' | 'api'
+type GraphViewMode = '2d' | '3d'
 
 interface SettingsState {
   // Document manager settings
@@ -48,6 +49,18 @@ interface SettingsState {
 
   backendMaxGraphNodes: number | null
   setBackendMaxGraphNodes: (maxNodes: number | null) => void
+
+  // 3D force-graph view mode (2D sigma vs 3D react-force-graph)
+  graphViewMode: GraphViewMode
+  setGraphViewMode: (mode: GraphViewMode) => void
+
+  // Incremental build animation: poll GET /graphs while pipeline is busy
+  enableIncrementalBuild: boolean
+  setEnableIncrementalBuild: (enable: boolean) => void
+
+  // 3D node label visibility (separate from 2D showNodeLabel)
+  show3DNodeLabel: boolean
+  setShow3DNodeLabel: (show: boolean) => void
 
   // Retrieval settings
   queryLabel: string
@@ -103,6 +116,10 @@ const useSettingsStoreBase = create<SettingsState>()(
       graphQueryMaxDepth: 3,
       graphMaxNodes: 1000,
       backendMaxGraphNodes: null,
+
+      graphViewMode: '2d',
+      enableIncrementalBuild: true,
+      show3DNodeLabel: true,
 
       queryLabel: defaultQueryLabel,
 
@@ -167,6 +184,10 @@ const useSettingsStoreBase = create<SettingsState>()(
 
       setBackendMaxGraphNodes: (maxNodes: number | null) => set({ backendMaxGraphNodes: maxNodes }),
 
+      setGraphViewMode: (mode: GraphViewMode) => set({ graphViewMode: mode }),
+      setEnableIncrementalBuild: (enable: boolean) => set({ enableIncrementalBuild: enable }),
+      setShow3DNodeLabel: (show: boolean) => set({ show3DNodeLabel: show }),
+
       setMinEdgeSize: (size: number) => set({ minEdgeSize: size }),
 
       setMaxEdgeSize: (size: number) => set({ maxEdgeSize: size }),
@@ -229,7 +250,7 @@ const useSettingsStoreBase = create<SettingsState>()(
     {
       name: 'settings-storage',
       storage: createJSONStorage(() => localStorage),
-      version: 20,
+      version: 22,
       migrate: (state: any, version: number) => {
         if (version < 2) {
           state.showEdgeLabel = false
@@ -342,6 +363,15 @@ const useSettingsStoreBase = create<SettingsState>()(
             ...suggestedUserPrompts.filter((p: string) => !existing.includes(p))
           ]
         }
+        if (version < 21) {
+          // 3D force-graph view mode + incremental build animation toggle
+          state.graphViewMode = '2d'
+          state.enableIncrementalBuild = true
+        }
+        if (version < 22) {
+          // 3D node label visibility toggle
+          state.show3DNodeLabel = true
+        }
         return state
       }
     }
@@ -350,4 +380,4 @@ const useSettingsStoreBase = create<SettingsState>()(
 
 const useSettingsStore = createSelectors(useSettingsStoreBase)
 
-export { useSettingsStore, type Theme }
+export { useSettingsStore, type Theme, type GraphViewMode }

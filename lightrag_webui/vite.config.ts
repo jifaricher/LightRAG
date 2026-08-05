@@ -54,7 +54,16 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), tailwindcss(), lightragRuntimeConfigPlugin(env)],
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, './src')
+        '@': path.resolve(__dirname, './src'),
+        // react-force-graph's ESM bundle imports 3d-force-graph-vr and
+        // 3d-force-graph-ar, which pull in AFRAME (a WebXR framework) via
+        // aframe-extras. AFRAME references the global `AFRAME` at module
+        // top-level, causing `ReferenceError: AFRAME is not defined` in dev.
+        // We never use VR/AR mode — only ForceGraph3D from 3d-force-graph —
+        // so stub these two packages to a no-op kapsule (returns a dummy
+        // component) and AFRAME never loads.
+        '3d-force-graph-vr': path.resolve(__dirname, './src/stubs/emptyKapsule.ts'),
+        '3d-force-graph-ar': path.resolve(__dirname, './src/stubs/emptyKapsule.ts')
       },
       // Force all modules to use the same katex instance
       // This ensures mhchem extension registered in main.tsx is available to rehype-katex
@@ -95,6 +104,14 @@ export default defineConfig(({ mode }) => {
             }
           ])
         ) : {}
+    },
+    optimizeDeps: {
+      // react-force-graph ships both CJS (.js, with AFRAME VR references that
+      // ReferenceError in dev) and ESM (.mjs) bundles. Vite's dep pre-bundler
+      // may pick the CJS entry and try to evaluate it, hitting `AFRAME is not
+      // defined`. Forcing the ESM entry avoids the AFRAME code path entirely.
+      // three-spritetext is pulled in transitively and needs the same treatment.
+      include: ['react-force-graph', 'three-spritetext']
     }
   }
 })

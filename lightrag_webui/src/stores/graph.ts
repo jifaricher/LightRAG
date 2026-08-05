@@ -16,6 +16,42 @@ const createErrorWithCause = (message: string, cause: unknown): Error => {
   return error
 }
 
+// --- 3D force-graph data types (react-force-graph format) ---
+export type Graph3DNode = {
+  id: string
+  name: string
+  color: string
+  val: number
+  label?: string
+  // d3-force-3d mutates these in place; carried over on diff to avoid re-layout
+  x?: number
+  y?: number
+  z?: number
+  vx?: number
+  vy?: number
+  vz?: number
+  fx?: number
+  fy?: number
+  fz?: number
+  // Original properties for PropertiesView (shared with 2D selection)
+  properties?: Record<string, any>
+  entity_type?: string
+}
+
+export type Graph3DLink = {
+  source: string
+  target: string
+  color?: string
+  width?: number
+  label?: string
+  properties?: Record<string, any>
+}
+
+export type Graph3DData = {
+  nodes: Graph3DNode[]
+  links: Graph3DLink[]
+}
+
 export type RawNodeType = {
   // for NetworkX: id is identical to properties['entity_id']
   // for Neo4j: id is unique identifier for each node
@@ -184,6 +220,25 @@ interface GraphState {
   graphDataVersion: number
   incrementGraphDataVersion: () => void
 
+  // --- 3D force-graph state ---
+  // 3D data in react-force-graph format ({nodes, links}). Independent of
+  // sigmaGraph; derived from rawGraph for static mode, from polling diffs for
+  // incremental build mode. Node positions (x/y/z) are preserved across diffs
+  // so d3-force-3d only nudges existing nodes and springs new ones into place.
+  graph3DData: Graph3DData
+  setGraph3DData: (data: Graph3DData) => void
+  // Delta signal: only the newly added nodes/edges from the last poll tick.
+  // ForceGraph3DContainer watches this to call fg.graphData() imperatively
+  // (prop-driven updates reset the whole force simulation).
+  graph3DDataDelta: { newNodes: number; newEdges: number } | null
+  setGraph3DDataDelta: (delta: { newNodes: number; newEdges: number } | null) => void
+  // True while the incremental build poller is actively polling GET /graphs.
+  isIncrementalBuilding: boolean
+  setIsIncrementalBuilding: (building: boolean) => void
+  // latest_message from GET /documents/pipeline_status, shown in the overlay.
+  incrementalMessage: string
+  setIncrementalMessage: (msg: string) => void
+
   // Methods for updating graph elements and UI state together
   updateNodeAndSelect: (nodeId: string, entityId: string, propertyName: string, newValue: string) => Promise<void>
   updateEdgeAndSelect: (edgeId: string, dynamicId: string, sourceId: string, targetId: string, propertyName: string, newValue: string) => Promise<void>
@@ -272,7 +327,11 @@ const useGraphStoreBase = create<GraphState>()((set, get) => ({
       moveToSelectedNode: false,
       graphIsEmpty: false,
       graphNodeCount: 0,
-      graphEdgeCount: 0
+      graphEdgeCount: 0,
+      graph3DData: { nodes: [], links: [] },
+      graph3DDataDelta: null,
+      isIncrementalBuilding: false,
+      incrementalMessage: ''
     });
   },
 
@@ -322,6 +381,16 @@ const useGraphStoreBase = create<GraphState>()((set, get) => ({
   // Version counter implementation
   graphDataVersion: 0,
   incrementGraphDataVersion: () => set((state) => ({ graphDataVersion: state.graphDataVersion + 1 })),
+
+  // 3D force-graph state
+  graph3DData: { nodes: [], links: [] },
+  setGraph3DData: (data: Graph3DData) => set({ graph3DData: data }),
+  graph3DDataDelta: null,
+  setGraph3DDataDelta: (delta: { newNodes: number; newEdges: number } | null) => set({ graph3DDataDelta: delta }),
+  isIncrementalBuilding: false,
+  setIsIncrementalBuilding: (building: boolean) => set({ isIncrementalBuilding: building }),
+  incrementalMessage: '',
+  setIncrementalMessage: (msg: string) => set({ incrementalMessage: msg }),
 
   // Methods for updating graph elements and UI state together
   updateNodeAndSelect: async (nodeId: string, entityId: string, propertyName: string, newValue: string) => {

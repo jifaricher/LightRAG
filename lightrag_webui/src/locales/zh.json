@@ -202,6 +202,14 @@
     "dataIsTruncated": "图数据已截断至最大返回节点数",
     "fetchRetriesExhausted": "加载图数据失败。请刷新后重试。",
     "graphBuildFailed": "渲染图数据失败。请刷新后重试。",
+    "viewMode": {
+      "2d": "2D 视图",
+      "3d": "3D 视图"
+    },
+    "incremental": {
+      "building": "构建中...",
+      "newNodes": "+{{count}} 个新实体"
+    },
     "statusDialog": {
       "title": "LightRAG 服务器设置",
       "description": "查看当前系统状态和连接信息"
