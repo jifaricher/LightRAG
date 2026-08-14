@@ -183,9 +183,20 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
       })
       initializedRef.current = true
     } else {
-      // Incremental: only new nodes (no existing coords) get the drop treatment
+      // Incremental: pin existing nodes in place (fx/fy/fz) so only new
+      // nodes animate — the rest of the graph stays perfectly still.
+      // New nodes (no existing coords) get the drop treatment.
       currentData.nodes.forEach((n: any) => {
-        if (n.y === undefined || n.x === undefined) {
+        if (n.x !== undefined && n.y !== undefined) {
+          // Existing node: fix its position so the simulation doesn't move it
+          n.fx = n.x
+          n.fy = n.y
+          n.fz = n.z ?? 0
+          n.vx = 0
+          n.vy = 0
+          n.vz = 0
+        } else {
+          // New node: spawn at high altitude for the drop-spring effect
           n.y = FG3D_DROP_INITIAL_Y
           n.vy = FG3D_DROP_INITIAL_VY
         }
