@@ -154,7 +154,9 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
     const currentData = useGraphStore.getState().graph3DData
     if (currentData.nodes.length === 0) return
 
-    if (!initializedRef.current) {
+    const isFirstLoad = !initializedRef.current
+
+    if (isFirstLoad) {
       // First load: initialize all nodes at high altitude for a dramatic
       // collective drop, then let the spring force snap them into place
       currentData.nodes.forEach((n: any) => {
@@ -172,22 +174,23 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
       })
     }
 
-    // Data is already set via the graphData prop (which reads from the store
-    // through the re-render). We just need to reheat the simulation and
-    // re-frame the camera.
+    // Reheat the simulation so the drop-spring effect triggers on new nodes.
+    // Only zoomToFit on first load — incremental updates must NOT reframe
+    // the camera, otherwise the whole graph shrinks every time a new entity
+    // appears, which is disorienting and breaks the "drop-in" visual.
     const fg = fgRef.current
     if (fg) {
-      // d3ReheatSimulation is forwarded through the ref by fromKapsule
       if (typeof fg.d3ReheatSimulation === 'function') {
         fg.d3ReheatSimulation()
       }
-      // Zoom to fit so nodes are framed in view
-      try {
-        if (typeof fg.zoomToFit === 'function') {
-          fg.zoomToFit(300, 60)
+      if (isFirstLoad) {
+        try {
+          if (typeof fg.zoomToFit === 'function') {
+            fg.zoomToFit(300, 60)
+          }
+        } catch {
+          // ignore — may not have positions yet
         }
-      } catch {
-        // ignore — may not have positions yet
       }
     }
   }, [graph3DData])
