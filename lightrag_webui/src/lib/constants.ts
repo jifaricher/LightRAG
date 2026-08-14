@@ -122,9 +122,9 @@ export const workerBudgetMs = (order: number): number => Math.min(1500 + order /
 // --- 3D force-graph (react-force-graph + three + d3-force-3d) ----------------
 // alpha_decay controls how fast the simulation loses energy and settles.
 // Lower = longer animation. velocity_decay lower = slower, gentler movement.
-export const FG3D_D3_ALPHA_DECAY = 0.006
-export const FG3D_D3_VELOCITY_DECAY = 0.15
-export const FG3D_COOLDOWN_TICKS = 600
+export const FG3D_D3_ALPHA_DECAY = 0.012
+export const FG3D_D3_VELOCITY_DECAY = 0.25
+export const FG3D_COOLDOWN_TICKS = 300
 export const FG3D_NODE_REL_SIZE = 3
 export const FG3D_LINK_WIDTH = 1
 // Above this node count, 3D labels are turned off (SpriteText per node is
@@ -139,8 +139,8 @@ export const FG3D_NODE_PERF_LIMIT = 5000
 //   LINK_STRENGTH 0.6 → soft spring, gentle pull; 1.0 → hard snap "啪"
 //   ALPHA_DECAY 0.005 → long oscillation; 0.025 → fast convergence
 export const FG3D_DROP_INITIAL_Y = -1800
-export const FG3D_DROP_INITIAL_VY = 0.15
-export const FG3D_DROP_LINK_STRENGTH = 0.4
+export const FG3D_DROP_INITIAL_VY = 0.8
+export const FG3D_DROP_LINK_STRENGTH = 0.8
 export const FG3D_DROP_LINK_DISTANCE = 30
 
 // --- Incremental build polling ----------------------------------------------
