@@ -15,6 +15,7 @@ import {
   FG3D_DROP_INITIAL_VY,
   FG3D_DROP_LINK_STRENGTH,
   FG3D_DROP_LINK_DISTANCE,
+  FG3D_DROP_LINK_DISTANCE_START,
   FG3D_CHARGE_STRENGTH,
   controlButtonVariant
 } from '@/lib/constants'
@@ -106,46 +107,55 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
   // onEngineTick callback, so lights never get added and nodes stay invisible.
   const lightingSetupRef = useRef(false)
   const onEngineTick = useCallback(() => {
-    if (lightingSetupRef.current) return
     const fg = fgRef.current
     if (!fg || typeof fg.scene !== 'function') return
 
-    // d3AlphaDecay / d3VelocityDecay / cooldownTicks are passed as props on
-    // the JSX element (see below), not as imperative calls.
+    // --- One-time setup: link strength, charge, lighting ---
+    if (!lightingSetupRef.current) {
+      // Configure the link force strength
+      const forceLink0 = fg.d3Force('link')
+      if (forceLink0) {
+        forceLink0.strength(FG3D_DROP_LINK_STRENGTH)
+        forceLink0.distance(FG3D_DROP_LINK_DISTANCE_START)
+      }
 
-    // Configure the link force for the drop-spring effect:
-    // high strength → links act as stiff springs, yanking falling nodes into place
+      // Reduce charge repulsion so nodes cluster more tightly
+      const forceCharge = fg.d3Force('charge')
+      if (forceCharge) {
+        forceCharge.strength(FG3D_CHARGE_STRENGTH)
+      }
+
+      // Add Three.js lighting so MeshStandardMaterial nodes have depth.
+      const scene = fg.scene()
+      if (scene) {
+        const ambient = new THREE.AmbientLight(isDarkMode ? 0x404060 : 0xffffff, isDarkMode ? 0.6 : 0.8)
+        scene.add(ambient)
+
+        const dirLight = new THREE.DirectionalLight(isDarkMode ? 0x8899ff : 0xffffff, isDarkMode ? 0.8 : 0.6)
+        dirLight.position.set(200, 300, 200)
+        scene.add(dirLight)
+
+        const pointLight = new THREE.PointLight(isDarkMode ? 0x6688ff : 0xffffff, isDarkMode ? 0.5 : 0.3)
+        pointLight.position.set(0, 0, 300)
+        scene.add(pointLight)
+      }
+
+      lightingSetupRef.current = true
+    }
+
+    // --- Every tick: shrink link distance as simulation converges ---
+    // d3 alpha starts at 1 (full energy) and decays toward 0 (settled).
+    // We interpolate link distance from START (large) → TARGET (normal)
+    // so links are long at first and gradually pull nodes together.
     const forceLink = fg.d3Force('link')
     if (forceLink) {
-      forceLink.strength(FG3D_DROP_LINK_STRENGTH)
-      forceLink.distance(FG3D_DROP_LINK_DISTANCE)
+      // alpha is accessible via the force layout's alpha() method
+      const alpha = typeof forceLink.alpha === 'function' ? forceLink.alpha() : 1
+      // alpha=1 → use START distance; alpha=0 → use TARGET distance
+      const t = 1 - alpha // 0 → 1 as simulation converges
+      const dist = FG3D_DROP_LINK_DISTANCE_START * (1 - t) + FG3D_DROP_LINK_DISTANCE * t
+      forceLink.distance(dist)
     }
-
-    // Reduce charge repulsion so nodes cluster more tightly instead of
-    // spreading far apart (d3-force default is -30, which is too sparse)
-    const forceCharge = fg.d3Force('charge')
-    if (forceCharge) {
-      forceCharge.strength(FG3D_CHARGE_STRENGTH)
-    }
-
-    // Add Three.js lighting so MeshStandardMaterial nodes have depth.
-    // Without lights, standard material renders as flat black — this was
-    // the root cause of the 3D graph being completely invisible.
-    const scene = fg.scene()
-    if (scene) {
-      const ambient = new THREE.AmbientLight(isDarkMode ? 0x404060 : 0xffffff, isDarkMode ? 0.6 : 0.8)
-      scene.add(ambient)
-
-      const dirLight = new THREE.DirectionalLight(isDarkMode ? 0x8899ff : 0xffffff, isDarkMode ? 0.8 : 0.6)
-      dirLight.position.set(200, 300, 200)
-      scene.add(dirLight)
-
-      const pointLight = new THREE.PointLight(isDarkMode ? 0x6688ff : 0xffffff, isDarkMode ? 0.5 : 0.3)
-      pointLight.position.set(0, 0, 300)
-      scene.add(pointLight)
-    }
-
-    lightingSetupRef.current = true
   }, [isDarkMode])
 
   // Imperative incremental update — applies the drop-spring animation
