@@ -11,6 +11,10 @@ import {
   FG3D_NODE_REL_SIZE,
   FG3D_LINK_WIDTH,
   FG3D_NODE_PERF_LIMIT,
+  FG3D_DROP_INITIAL_Y,
+  FG3D_DROP_INITIAL_VY,
+  FG3D_DROP_LINK_STRENGTH,
+  FG3D_DROP_LINK_DISTANCE,
   controlButtonVariant
 } from '@/lib/constants'
 import useIsDarkMode from '@/hooks/useIsDarkMode'
@@ -69,6 +73,14 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
   // Track whether the initial data has been fed via prop (first mount only)
   const initializedRef = useRef(false)
 
+  // Reset initialization flag when graph3DData is cleared (e.g. when the
+  // incremental poller starts and clears existing data for a fresh drop-in)
+  useEffect(() => {
+    if (graph3DData.nodes.length === 0) {
+      initializedRef.current = false
+    }
+  }, [graph3DData])
+
   // Hovered node id for highlight state
   const hoverNodeRef = useRef<string | null>(null)
 
@@ -86,50 +98,109 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
     return () => ro.disconnect()
   }, [])
 
-  // d3-force-3d parameters + scene lighting — set once after the engine is created
-  const onEngineCreated = useCallback(() => {
+  // d3-force-3d parameters + scene lighting — set once after the engine is
+  // fully initialized. react-force-graph has NO `onEngineCreated` callback;
+  // the only lifecycle hooks are `onEngineTick` / `onEngineStop`. We use a
+  // ref guard so the setup runs exactly once when the first tick fires.
+  const lightingSetupRef = useRef(false)
+  const onEngineTick = useCallback(() => {
+    if (lightingSetupRef.current) return
     const fg = fgRef.current
-    if (!fg) return
+    if (!fg || typeof fg.scene !== 'function') return
+
+    // d3-force-3d parameters
     fg.d3AlphaDecay(FG3D_D3_ALPHA_DECAY)
     fg.d3VelocityDecay(FG3D_D3_VELOCITY_DECAY)
     fg.cooldownTicks(FG3D_COOLDOWN_TICKS)
 
+    // Configure the link force for the drop-spring effect:
+    // high strength → links act as stiff springs, yanking falling nodes into place
+    const forceLink = fg.d3Force('link')
+    if (forceLink) {
+      forceLink.strength(FG3D_DROP_LINK_STRENGTH)
+      forceLink.distance(FG3D_DROP_LINK_DISTANCE)
+    }
+
     // Add Three.js lighting so MeshStandardMaterial nodes have depth.
-    // Without lights, standard material renders as flat black.
+    // Without lights, standard material renders as flat black — this was
+    // the root cause of the 3D graph being completely invisible.
     const scene = fg.scene()
     if (scene) {
-      // Ambient: soft base illumination so nothing is pitch black
       const ambient = new THREE.AmbientLight(isDarkMode ? 0x404060 : 0xffffff, isDarkMode ? 0.6 : 0.8)
       scene.add(ambient)
 
-      // Directional: simulates a distant light source, gives nodes a lit
-      // hemisphere and a shadowed one — creates the 3D "ball" look
       const dirLight = new THREE.DirectionalLight(isDarkMode ? 0x8899ff : 0xffffff, isDarkMode ? 0.8 : 0.6)
       dirLight.position.set(200, 300, 200)
       scene.add(dirLight)
 
-      // Point light near camera for a subtle fill
       const pointLight = new THREE.PointLight(isDarkMode ? 0x6688ff : 0xffffff, isDarkMode ? 0.5 : 0.3)
       pointLight.position.set(0, 0, 300)
       scene.add(pointLight)
     }
-  }, [isDarkMode])
 
-  // Imperative incremental update
-  useEffect(() => {
-    const fg = fgRef.current
-    if (!fg) return
-
-    const currentData = useGraphStore.getState().graph3DData
-    if (currentData.nodes.length === 0) return
-
-    if (!initializedRef.current) {
-      initializedRef.current = true
+    // After setup, do an initial zoomToFit so nodes are in view
+    try {
+      fg.zoomToFit(300, 60)
+    } catch {
+      // zoomToFit can fail if no data yet — ignore, retry on next tick
       return
     }
 
-    fg.graphData(currentData)
-  }, [graph3DDataDelta])
+    lightingSetupRef.current = true
+  }, [isDarkMode])
+
+  // Imperative incremental update — applies the drop-spring animation
+  // to newly added nodes (spawn at high altitude, fall into place).
+  // Triggers on any graph3DData change (both static load and incremental delta).
+  useEffect(() => {
+    let retries = 0
+    const applyData = () => {
+      const fg = fgRef.current
+      const currentData = useGraphStore.getState().graph3DData
+
+      if (!fg || typeof fg.graphData !== 'function') {
+        // fgRef not ready yet — retry with backoff, max 30 attempts (3s)
+        if (retries++ < 30) {
+          setTimeout(applyData, 100)
+        }
+        return
+      }
+
+      if (currentData.nodes.length === 0) return
+
+      if (!initializedRef.current) {
+        // First load: initialize all nodes at high altitude for a dramatic
+        // collective drop, then let the spring force snap them into place
+        currentData.nodes.forEach((n: any) => {
+          n.y = FG3D_DROP_INITIAL_Y
+          n.vy = FG3D_DROP_INITIAL_VY
+        })
+        initializedRef.current = true
+      } else {
+        // Incremental: only new nodes (no existing coords) get the drop treatment
+        currentData.nodes.forEach((n: any) => {
+          if (n.y === undefined || n.x === undefined) {
+            n.y = FG3D_DROP_INITIAL_Y
+            n.vy = FG3D_DROP_INITIAL_VY
+          }
+        })
+      }
+
+      fg.graphData(currentData)
+      // Reheat the simulation so the drop-spring effect triggers
+      if (typeof fg.d3Reheat === 'function') {
+        fg.d3Reheat()
+      }
+      // Zoom to fit after data is pushed, so nodes are framed in view
+      try {
+        fg.zoomToFit(300, 60)
+      } catch {
+        // ignore — may not have positions yet
+      }
+    }
+
+    applyData()
+  }, [graph3DData])
 
   // Node 3D object: glowing sphere with SpriteText label.
   // Each node gets a MeshStandardMaterial so it catches the scene lighting
@@ -207,13 +278,19 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
     fgRef.current?.zoomToFit(300, 60)
   }, [])
 
-  const initialGraphData: Graph3DData = graph3DData
+  // Only pass initial graph data on the very first render. After that, all
+  // data updates go through the imperative fgRef.current.graphData() API in
+  // the effect below. Passing a changing graphData prop would cause
+  // react-force-graph to rebuild the entire d3 force simulation on every
+  // store update, resetting all node positions and killing the drop-spring
+  // animation.
+  const initialGraphData = useRef<Graph3DData>({ nodes: [], links: [] })
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden">
       <ForceGraph3D
         ref={fgRef}
-        graphData={initialGraphData}
+        graphData={initialGraphData.current}
         backgroundColor={isDarkMode ? '#080812' : '#f0f2f8'}
         nodeColor={(node: any) => node.color}
         nodeRelSize={FG3D_NODE_REL_SIZE}
@@ -234,7 +311,7 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
         cooldownTicks={FG3D_COOLDOWN_TICKS}
         d3AlphaDecay={FG3D_D3_ALPHA_DECAY}
         d3VelocityDecay={FG3D_D3_VELOCITY_DECAY}
-        onEngineCreated={onEngineCreated}
+        onEngineTick={onEngineTick}
         onNodeClick={onNodeClick}
         onNodeHover={handleNodeHover}
         onBackgroundClick={onBackgroundClick}

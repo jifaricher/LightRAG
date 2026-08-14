@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useGraphStore } from '@/stores/graph'
 import { useSettingsStore } from '@/stores/settings'
 import { queryGraphs, getPipelineStatus } from '@/api/lightrag'
-import { diffIntoGraphData, initKnownIds } from '@/utils/graph3dData'
+import { diffIntoGraphData } from '@/utils/graph3dData'
 import {
   INCREMENTAL_POLL_INTERVAL_MS,
   INCREMENTAL_NO_CHANGE_STOP_THRESHOLD
@@ -49,14 +49,16 @@ const useIncrementalGraph = () => {
       return
     }
 
-    // Initialize known-id sets from whatever 3D data is already loaded
-    // (e.g. the static full load from useLightragGraph3D)
-    const current3D = useGraphStore.getState().graph3DData
-    if (current3D.nodes.length > 0) {
-      const { nodeIds, edgeIds } = initKnownIds(current3D)
-      knownNodeIdsRef.current = nodeIds
-      knownEdgeIdsRef.current = edgeIds
-    }
+    // Start from empty known-id sets so the first tick treats all current
+    // graph nodes as "new" — they will drop in from high altitude one by one.
+    // This is intentional: we want the drop-spring animation even for the
+    // initial data, not just for nodes added after the poller starts.
+    knownNodeIdsRef.current = new Set()
+    knownEdgeIdsRef.current = new Set()
+    // Clear existing 3D data and set building flag so useLightragGraph3D
+    // doesn't clobber our incremental data with a full static load.
+    useGraphStore.getState().setGraph3DData({ nodes: [], links: [] })
+    useGraphStore.getState().setIsIncrementalBuilding(true)
 
     let cancelled = false
 

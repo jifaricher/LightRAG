@@ -122,7 +122,7 @@ export const workerBudgetMs = (order: number): number => Math.min(1500 + order /
 // --- 3D force-graph (react-force-graph + three + d3-force-3d) ----------------
 // Lower alpha decay → simulation runs longer → newly added nodes drift in more
 // gently instead of snapping. Velocity decay damps oscillation.
-export const FG3D_D3_ALPHA_DECAY = 0.02
+export const FG3D_D3_ALPHA_DECAY = 0.015
 export const FG3D_D3_VELOCITY_DECAY = 0.3
 export const FG3D_COOLDOWN_TICKS = 150
 export const FG3D_NODE_REL_SIZE = 3
@@ -130,6 +130,17 @@ export const FG3D_LINK_WIDTH = 1
 // Above this node count, 3D labels are turned off (SpriteText per node is
 // expensive); 2D sigma stays the better choice for very large graphs.
 export const FG3D_NODE_PERF_LIMIT = 5000
+
+// --- Drop-spring animation ---------------------------------------------------
+// New nodes spawn at a high altitude and "fall" into place, snapped by links
+// like a spring. Tweak these for the desired visual effect.
+//   INITIAL_Y  -1800 → strong drop impact; -800 → gentle settle
+//   LINK_STRENGTH 1.0 → hard spring, "啪" snapped tight; 0.4 → soft wobble
+//   ALPHA_DECAY 0.012 → long oscillation; 0.025 → fast convergence
+export const FG3D_DROP_INITIAL_Y = -1800
+export const FG3D_DROP_INITIAL_VY = 1.0
+export const FG3D_DROP_LINK_STRENGTH = 1.0
+export const FG3D_DROP_LINK_DISTANCE = 30
 
 // --- Incremental build polling ----------------------------------------------
 // Interval between GET /graphs polls while the pipeline is busy. Backed by no
