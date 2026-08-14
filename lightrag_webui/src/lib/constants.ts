@@ -124,8 +124,9 @@ export const workerBudgetMs = (order: number): number => Math.min(1500 + order /
 // avoiding the "animate-stop-animate-stop" stutter. cooldownTicks well above
 // the poll interval (2500ms ≈ 150 ticks@60fps) keeps the engine running
 // continuously during incremental builds.
+// velocity_decay lower → less damping → slower, gentler movement.
 export const FG3D_D3_ALPHA_DECAY = 0.005
-export const FG3D_D3_VELOCITY_DECAY = 0.3
+export const FG3D_D3_VELOCITY_DECAY = 0.2
 export const FG3D_COOLDOWN_TICKS = 1000
 export const FG3D_NODE_REL_SIZE = 3
 export const FG3D_LINK_WIDTH = 1
@@ -137,11 +138,12 @@ export const FG3D_NODE_PERF_LIMIT = 5000
 // New nodes spawn at a high altitude and "fall" into place, snapped by links
 // like a spring. Tweak these for the desired visual effect.
 //   INITIAL_Y  -1800 → strong drop impact; -800 → gentle settle
-//   LINK_STRENGTH 1.0 → hard spring, "啪" snapped tight; 0.4 → soft wobble
-//   ALPHA_DECAY 0.012 → long oscillation; 0.025 → fast convergence
+//   INITIAL_VY  0.3 → slow fall; 1.0 → fast drop
+//   LINK_STRENGTH 0.6 → soft spring, gentle pull; 1.0 → hard snap "啪"
+//   ALPHA_DECAY 0.005 → long oscillation; 0.025 → fast convergence
 export const FG3D_DROP_INITIAL_Y = -1800
-export const FG3D_DROP_INITIAL_VY = 1.0
-export const FG3D_DROP_LINK_STRENGTH = 1.0
+export const FG3D_DROP_INITIAL_VY = 0.3
+export const FG3D_DROP_LINK_STRENGTH = 0.6
 export const FG3D_DROP_LINK_DISTANCE = 30
 
 // --- Incremental build polling ----------------------------------------------
