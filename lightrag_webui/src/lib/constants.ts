@@ -120,11 +120,13 @@ export const EDGE_PERF_LIMIT = 5000
 export const workerBudgetMs = (order: number): number => Math.min(1500 + order / 10, 10000)
 
 // --- 3D force-graph (react-force-graph + three + d3-force-3d) ----------------
-// Lower alpha decay → simulation runs longer → newly added nodes drift in more
-// gently instead of snapping. Velocity decay damps oscillation.
-export const FG3D_D3_ALPHA_DECAY = 0.015
+// Lower alpha decay → simulation stays "alive" longer between poll ticks,
+// avoiding the "animate-stop-animate-stop" stutter. cooldownTicks well above
+// the poll interval (2500ms ≈ 150 ticks@60fps) keeps the engine running
+// continuously during incremental builds.
+export const FG3D_D3_ALPHA_DECAY = 0.005
 export const FG3D_D3_VELOCITY_DECAY = 0.3
-export const FG3D_COOLDOWN_TICKS = 150
+export const FG3D_COOLDOWN_TICKS = 1000
 export const FG3D_NODE_REL_SIZE = 3
 export const FG3D_LINK_WIDTH = 1
 // Above this node count, 3D labels are turned off (SpriteText per node is
