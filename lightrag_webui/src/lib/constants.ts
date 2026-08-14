@@ -120,13 +120,12 @@ export const EDGE_PERF_LIMIT = 5000
 export const workerBudgetMs = (order: number): number => Math.min(1500 + order / 10, 10000)
 
 // --- 3D force-graph (react-force-graph + three + d3-force-3d) ----------------
-// alpha_decay ≈ 0 means the simulation never loses energy → nodes keep
-// gently drifting forever (living graph effect). velocity_decay controls
-// how fast they move. cooldownTicks set to Infinity so the engine never
-// auto-stops (0 would stop after 1 tick — the check is cntTicks > N).
-export const FG3D_D3_ALPHA_DECAY = 0.0008
-export const FG3D_D3_VELOCITY_DECAY = 0.2
-export const FG3D_COOLDOWN_TICKS = Infinity
+// alpha_decay controls how fast the simulation loses energy and settles.
+// 0.01 = gentle settle in ~5-8s, nodes drift slowly into place then stop.
+// velocity_decay controls movement speed; cooldownTicks caps runtime.
+export const FG3D_D3_ALPHA_DECAY = 0.01
+export const FG3D_D3_VELOCITY_DECAY = 0.3
+export const FG3D_COOLDOWN_TICKS = 600
 export const FG3D_NODE_REL_SIZE = 3
 export const FG3D_LINK_WIDTH = 1
 // Above this node count, 3D labels are turned off (SpriteText per node is
