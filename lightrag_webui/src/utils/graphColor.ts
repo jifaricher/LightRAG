@@ -1,4 +1,4 @@
-const DEFAULT_NODE_COLOR = '#5D6D7E'
+const DEFAULT_NODE_COLOR = '#9AA8B8'
 
 const TYPE_SYNONYMS: Record<string, string> = {
   unknown: 'unknown',
@@ -143,33 +143,33 @@ const TYPE_SYNONYMS: Record<string, string> = {
 }
 
 const NODE_TYPE_COLORS: Record<string, string> = {
-  person: '#4169E1',
-  creature: '#bd7ebe',
-  organization: '#00cc00',
-  location: '#cf6d17',
-  event: '#00bfa0',
-  concept: '#e3493b',
-  method: '#b71c1c',
-  content: '#0f558a',
-  data: '#0000ff',
-  artifact: '#4421af',
-  naturalobject: '#b2e061',
-  other: '#f4d371',
-  unknown: '#b0b0b0'
+  person: '#7BA3E8',
+  creature: '#C9A0DC',
+  organization: '#8ED18E',
+  location: '#F0B07B',
+  event: '#7BD9C4',
+  concept: '#F0918A',
+  method: '#E88A8A',
+  content: '#8AB8E0',
+  data: '#8A9AE8',
+  artifact: '#B89AE0',
+  naturalobject: '#C5E08A',
+  other: '#F0D88A',
+  unknown: '#C0C0C0'
 }
 
 const EXTENDED_COLORS = [
-  '#84a3e1',
-  '#5a2c6d',
-  '#2F4F4F',
-  '#003366',
-  '#9b3a31',
-  '#00CED1',
-  '#b300b3',
-  '#0f705d',
-  '#ff99cc',
-  '#6ef7b3',
-  '#cd071e'
+  '#A5B8E8',
+  '#B89AE0',
+  '#8ED1D1',
+  '#8AB8E0',
+  '#E8A5A5',
+  '#8AC9E0',
+  '#C9A0DC',
+  '#8ED1B0',
+  '#F0B5D0',
+  '#A5E8C4',
+  '#E8B09A'
 ]
 
 const PREDEFINED_COLOR_SET = new Set(Object.values(NODE_TYPE_COLORS))
