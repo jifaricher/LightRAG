@@ -141,7 +141,12 @@ export const FG3D_NODE_PERF_LIMIT = 5000
 export const FG3D_DROP_INITIAL_Y = -1800
 export const FG3D_DROP_INITIAL_VY = 0.3
 export const FG3D_DROP_LINK_STRENGTH = 0.6
-export const FG3D_DROP_LINK_DISTANCE = 30
+export const FG3D_DROP_LINK_DISTANCE = 20
+
+// --- Charge repulsion (node spacing) ----------------------------------------
+// Lower (more negative) = stronger repulsion = more spread out.
+// -30 is d3-force default; -10 keeps the graph compact without overlapping.
+export const FG3D_CHARGE_STRENGTH = -10
 
 // --- Incremental build polling ----------------------------------------------
 // Interval between GET /graphs polls while the pipeline is busy. Backed by no

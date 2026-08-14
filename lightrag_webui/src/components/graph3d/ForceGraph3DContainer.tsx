@@ -15,6 +15,7 @@ import {
   FG3D_DROP_INITIAL_VY,
   FG3D_DROP_LINK_STRENGTH,
   FG3D_DROP_LINK_DISTANCE,
+  FG3D_CHARGE_STRENGTH,
   controlButtonVariant
 } from '@/lib/constants'
 import useIsDarkMode from '@/hooks/useIsDarkMode'
@@ -118,6 +119,13 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
     if (forceLink) {
       forceLink.strength(FG3D_DROP_LINK_STRENGTH)
       forceLink.distance(FG3D_DROP_LINK_DISTANCE)
+    }
+
+    // Reduce charge repulsion so nodes cluster more tightly instead of
+    // spreading far apart (d3-force default is -30, which is too sparse)
+    const forceCharge = fg.d3Force('charge')
+    if (forceCharge) {
+      forceCharge.strength(FG3D_CHARGE_STRENGTH)
     }
 
     // Add Three.js lighting so MeshStandardMaterial nodes have depth.
