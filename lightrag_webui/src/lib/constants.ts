@@ -141,7 +141,7 @@ export const FG3D_NODE_PERF_LIMIT = 5000
 export const FG3D_DROP_INITIAL_Y = -1800
 export const FG3D_DROP_INITIAL_VY = 0.1
 export const FG3D_DROP_LINK_STRENGTH = 0.4
-export const FG3D_DROP_LINK_DISTANCE = 30
+export const FG3D_DROP_LINK_DISTANCE = 60
 
 // --- Charge repulsion (node spacing) ----------------------------------------
 // Lower (more negative) = stronger repulsion = more spread out.
