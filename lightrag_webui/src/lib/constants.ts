@@ -139,7 +139,7 @@ export const FG3D_NODE_PERF_LIMIT = 5000
 //   LINK_STRENGTH 0.6 → soft spring, gentle pull; 1.0 → hard snap "啪"
 //   ALPHA_DECAY 0.005 → long oscillation; 0.025 → fast convergence
 export const FG3D_DROP_INITIAL_Y = -1800
-export const FG3D_DROP_INITIAL_VY = 0.006
+export const FG3D_DROP_INITIAL_VY = 0.003
 export const FG3D_DROP_LINK_STRENGTH = 0.4
 export const FG3D_DROP_LINK_DISTANCE = 30
 // Link distance starts at this value (large) and shrinks to FG3D_DROP_LINK_DISTANCE
