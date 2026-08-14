@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react'
 import { ForceGraph3D } from 'react-force-graph'
 import SpriteText from 'three-spritetext'
 import { useTranslation } from 'react-i18next'
-import { useGraphStore, type Graph3DData } from '@/stores/graph'
+import { useGraphStore } from '@/stores/graph'
 import { useSettingsStore } from '@/stores/settings'
 import {
   FG3D_D3_ALPHA_DECAY,
@@ -65,7 +65,6 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
   const [dims, setDims] = useState({ width: 800, height: 600 })
   const isDarkMode = useIsDarkMode()
   const graph3DData = useGraphStore.use.graph3DData()
-  const graph3DDataDelta = useGraphStore.use.graph3DDataDelta()
   const isIncrementalBuilding = useGraphStore.use.isIncrementalBuilding()
   const show3DNodeLabel = useSettingsStore.use.show3DNodeLabel()
   const { t } = useTranslation()
@@ -98,20 +97,20 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
     return () => ro.disconnect()
   }, [])
 
-  // d3-force-3d parameters + scene lighting — set once after the engine is
-  // fully initialized. react-force-graph has NO `onEngineCreated` callback;
-  // the only lifecycle hooks are `onEngineTick` / `onEngineStop`. We use a
-  // ref guard so the setup runs exactly once when the first tick fires.
+  // Scene lighting — set once after the engine starts ticking.
+  // react-force-graph's fromKapsule wrapper only forwards a limited set of
+  // instance methods through the ref (scene, camera, d3Force, zoomToFit, etc.).
+  // d3AlphaDecay / d3VelocityDecay / cooldownTicks are PROPS, not methods —
+  // calling them on the instance throws "not a function" and crashes the
+  // onEngineTick callback, so lights never get added and nodes stay invisible.
   const lightingSetupRef = useRef(false)
   const onEngineTick = useCallback(() => {
     if (lightingSetupRef.current) return
     const fg = fgRef.current
     if (!fg || typeof fg.scene !== 'function') return
 
-    // d3-force-3d parameters
-    fg.d3AlphaDecay(FG3D_D3_ALPHA_DECAY)
-    fg.d3VelocityDecay(FG3D_D3_VELOCITY_DECAY)
-    fg.cooldownTicks(FG3D_COOLDOWN_TICKS)
+    // d3AlphaDecay / d3VelocityDecay / cooldownTicks are passed as props on
+    // the JSX element (see below), not as imperative calls.
 
     // Configure the link force for the drop-spring effect:
     // high strength → links act as stiff springs, yanking falling nodes into place
@@ -138,68 +137,59 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
       scene.add(pointLight)
     }
 
-    // After setup, do an initial zoomToFit so nodes are in view
-    try {
-      fg.zoomToFit(300, 60)
-    } catch {
-      // zoomToFit can fail if no data yet — ignore, retry on next tick
-      return
-    }
-
     lightingSetupRef.current = true
   }, [isDarkMode])
 
   // Imperative incremental update — applies the drop-spring animation
   // to newly added nodes (spawn at high altitude, fall into place).
   // Triggers on any graph3DData change (both static load and incremental delta).
+  //
+  // NOTE: react-force-graph's fromKapsule wrapper does NOT forward
+  // `graphData()` as an instance method through the ref. The only way to
+  // update data is through the `graphData` prop. However, prop-driven updates
+  // cause the internal ThreeForceGraph to diff by node id and preserve
+  // existing node coordinates — so the drop-spring animation still works
+  // as long as we set y/vy on the nodes before passing them.
   useEffect(() => {
-    let retries = 0
-    const applyData = () => {
-      const fg = fgRef.current
-      const currentData = useGraphStore.getState().graph3DData
+    const currentData = useGraphStore.getState().graph3DData
+    if (currentData.nodes.length === 0) return
 
-      if (!fg || typeof fg.graphData !== 'function') {
-        // fgRef not ready yet — retry with backoff, max 30 attempts (3s)
-        if (retries++ < 30) {
-          setTimeout(applyData, 100)
-        }
-        return
-      }
-
-      if (currentData.nodes.length === 0) return
-
-      if (!initializedRef.current) {
-        // First load: initialize all nodes at high altitude for a dramatic
-        // collective drop, then let the spring force snap them into place
-        currentData.nodes.forEach((n: any) => {
+    if (!initializedRef.current) {
+      // First load: initialize all nodes at high altitude for a dramatic
+      // collective drop, then let the spring force snap them into place
+      currentData.nodes.forEach((n: any) => {
+        n.y = FG3D_DROP_INITIAL_Y
+        n.vy = FG3D_DROP_INITIAL_VY
+      })
+      initializedRef.current = true
+    } else {
+      // Incremental: only new nodes (no existing coords) get the drop treatment
+      currentData.nodes.forEach((n: any) => {
+        if (n.y === undefined || n.x === undefined) {
           n.y = FG3D_DROP_INITIAL_Y
           n.vy = FG3D_DROP_INITIAL_VY
-        })
-        initializedRef.current = true
-      } else {
-        // Incremental: only new nodes (no existing coords) get the drop treatment
-        currentData.nodes.forEach((n: any) => {
-          if (n.y === undefined || n.x === undefined) {
-            n.y = FG3D_DROP_INITIAL_Y
-            n.vy = FG3D_DROP_INITIAL_VY
-          }
-        })
-      }
+        }
+      })
+    }
 
-      fg.graphData(currentData)
-      // Reheat the simulation so the drop-spring effect triggers
-      if (typeof fg.d3Reheat === 'function') {
-        fg.d3Reheat()
+    // Data is already set via the graphData prop (which reads from the store
+    // through the re-render). We just need to reheat the simulation and
+    // re-frame the camera.
+    const fg = fgRef.current
+    if (fg) {
+      // d3ReheatSimulation is forwarded through the ref by fromKapsule
+      if (typeof fg.d3ReheatSimulation === 'function') {
+        fg.d3ReheatSimulation()
       }
-      // Zoom to fit after data is pushed, so nodes are framed in view
+      // Zoom to fit so nodes are framed in view
       try {
-        fg.zoomToFit(300, 60)
+        if (typeof fg.zoomToFit === 'function') {
+          fg.zoomToFit(300, 60)
+        }
       } catch {
         // ignore — may not have positions yet
       }
     }
-
-    applyData()
   }, [graph3DData])
 
   // Node 3D object: glowing sphere with SpriteText label.
@@ -267,30 +257,38 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
     hoverNodeRef.current = node?.id ?? null
   }, [])
 
-  // Zoom controls (imperative)
+  // Zoom controls (imperative). 3D ForceGraph has no zoom() method,
+  // only zoomToFit and cameraPosition. We use cameraPosition to dolly
+  // in/out along the z-axis.
   const handleZoomIn = useCallback(() => {
-    fgRef.current?.zoom(0.8, 200)
+    const fg = fgRef.current
+    if (!fg || typeof fg.cameraPosition !== 'function') return
+    const cam = fg.cameraPosition()
+    fg.cameraPosition({ x: cam.x, y: cam.y, z: cam.z * 0.8 }, undefined, 200)
   }, [])
   const handleZoomOut = useCallback(() => {
-    fgRef.current?.zoom(1.2, 200)
+    const fg = fgRef.current
+    if (!fg || typeof fg.cameraPosition !== 'function') return
+    const cam = fg.cameraPosition()
+    fg.cameraPosition({ x: cam.x, y: cam.y, z: cam.z * 1.2 }, undefined, 200)
   }, [])
   const handleResetZoom = useCallback(() => {
     fgRef.current?.zoomToFit(300, 60)
   }, [])
 
-  // Only pass initial graph data on the very first render. After that, all
-  // data updates go through the imperative fgRef.current.graphData() API in
-  // the effect below. Passing a changing graphData prop would cause
-  // react-force-graph to rebuild the entire d3 force simulation on every
-  // store update, resetting all node positions and killing the drop-spring
-  // animation.
-  const initialGraphData = useRef<Graph3DData>({ nodes: [], links: [] })
+  // Data flows through the graphData prop (prop-driven). The fromKapsule
+  // wrapper does NOT forward graphData() as an instance method through the
+  // ref, so imperative updates are not possible. Instead, the internal
+  // ThreeForceGraph diffs by node id on prop changes and preserves existing
+  // node coordinates (x/y/z/vx/vy/vz), which is exactly what we need for
+  // the drop-spring animation: new nodes get y/vy set in the effect above,
+  // existing nodes keep their simulated positions.
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden">
       <ForceGraph3D
         ref={fgRef}
-        graphData={initialGraphData.current}
+        graphData={graph3DData}
         backgroundColor={isDarkMode ? '#080812' : '#f0f2f8'}
         nodeColor={(node: any) => node.color}
         nodeRelSize={FG3D_NODE_REL_SIZE}
