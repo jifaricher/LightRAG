@@ -144,7 +144,7 @@ export const FG3D_DROP_LINK_STRENGTH = 0.4
 export const FG3D_DROP_LINK_DISTANCE = 30
 // Link distance starts at this value (large) and shrinks to FG3D_DROP_LINK_DISTANCE
 // as the simulation converges, creating a "pull-together" visual.
-export const FG3D_DROP_LINK_DISTANCE_START = 200
+export const FG3D_DROP_LINK_DISTANCE_START = 300
 
 // --- Charge repulsion (node spacing) ----------------------------------------
 // Lower (more negative) = stronger repulsion = more spread out.
