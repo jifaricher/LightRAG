@@ -19,6 +19,9 @@ import {
   FG3D25D_DROP_LINK_DISTANCE,
   FG3D25D_DROP_LINK_DISTANCE_START,
   FG3D25D_DROP_EDGE_RADIUS,
+  FG3D_DROP_RADIUS_SCALE,
+  FG3D_DROP_Z_SCALE,
+  FG3D_REFIT_GROWTH_THRESHOLD,
   FG3D25D_CHARGE_STRENGTH,
   FG3D25D_CAMERA_POSITION,
   controlButtonVariant
@@ -67,6 +70,13 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
 
   // Whether we're waiting for the simulation to settle before calling zoomToFit
   const pendingZoomFitRef = useRef(false)
+
+  // User manually zoomed — suppresses auto-refit until ResetZoom
+  const userZoomedRef = useRef(false)
+  // Set after incremental drop; onEngineStop checks growth threshold to refit
+  const pendingIncrementalRefitRef = useRef(false)
+  // XY extent captured before the incremental drop, for growth comparison
+  const prevBboxExtentRef = useRef(0)
 
   useEffect(() => {
     if (graph3DData.nodes.length === 0) {
@@ -184,6 +194,25 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
       }
       if (count > 0) { cx /= count; cy /= count }
 
+      // Adaptive spawn/drop geometry: scale to the graph's actual bounding
+      // box so new nodes always appear outside the existing graph and the
+      // drop distance stays proportionally visible as the graph grows.
+      const fg = fgRef.current
+      let spawnRadius = FG3D25D_DROP_EDGE_RADIUS
+      let dropZ = FG3D25D_DROP_INITIAL_Z
+      if (fg && typeof fg.getGraphBbox === 'function') {
+        const bbox = fg.getGraphBbox()
+        if (bbox) {
+          const bboxW = bbox.x[1] - bbox.x[0]
+          const bboxH = bbox.y[1] - bbox.y[0]
+          const extent = Math.max(bboxW, bboxH)
+          spawnRadius = Math.max(extent * FG3D_DROP_RADIUS_SCALE, FG3D25D_DROP_EDGE_RADIUS)
+          dropZ = Math.max(extent * FG3D_DROP_Z_SCALE, FG3D25D_DROP_INITIAL_Z)
+          prevBboxExtentRef.current = extent
+        }
+      }
+      pendingIncrementalRefitRef.current = true
+
       let angleIdx = 0
       currentData.nodes.forEach((n: any) => {
         if (n.x !== undefined && n.y !== undefined) {
@@ -198,9 +227,9 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
           // New node: spawn on outer ring around centroid, far Z for drop
           const angle = (angleIdx * 137.5) * Math.PI / 180 // golden angle for even spread
           angleIdx++
-          n.x = cx + FG3D25D_DROP_EDGE_RADIUS * Math.cos(angle)
-          n.y = cy + FG3D25D_DROP_EDGE_RADIUS * Math.sin(angle)
-          n.z = FG3D25D_DROP_INITIAL_Z
+          n.x = cx + spawnRadius * Math.cos(angle)
+          n.y = cy + spawnRadius * Math.sin(angle)
+          n.z = dropZ
           n.vx = 0
           n.vy = 0
           n.vz = FG3D25D_DROP_INITIAL_VZ
@@ -219,12 +248,14 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
         // of the initial far-z positions which would make the graph tiny.
         pendingZoomFitRef.current = true
       } else {
-        // Incremental: moderate alpha so new nodes snap in quickly but
-        // existing pinned nodes aren't disturbed.
-        const sim = fg.d3Force?.()
-        if (sim && typeof sim.alpha === 'function') {
-          sim.alpha(0.3)
-          sim.restart()
+        // Incremental: reheat the simulation so new nodes (spawned at far Z)
+        // have full energy to drop into place. Existing nodes are pinned
+        // (fx/fy/fz) so they don't move — only new nodes animate.
+        // NOTE: fg.d3Force() with no args returns undefined, not the simulation.
+        // Use d3ReheatSimulation() which internally calls sim.alpha(1) and
+        // restarts the engine via engineRunning=true.
+        if (typeof fg.d3ReheatSimulation === 'function') {
+          fg.d3ReheatSimulation()
         }
       }
     }
@@ -270,8 +301,7 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
     const mat = new THREE.LineBasicMaterial({
       color: isDarkMode ? 0x4a6fa5 : 0x8899bb,
       transparent: true,
-      opacity: 0.35,
-      linewidth: FG3D_LINK_WIDTH
+      opacity: 0.5
     })
     return mat
   }, [isDarkMode])
@@ -280,12 +310,38 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
     hoverNodeRef.current = node?.id ?? null
   }, [])
 
-  // Called once when the d3 simulation settles. Pin all nodes' z to 0 so
-  // frozen layouts (Circular, Circlepack, Random) that deleted fz for the
-  // drop animation don't keep jittering on the Z axis due to link/forceZ
-  // residual forces fighting each other.
+  // Called once when the d3 simulation settles.
+  // 1. First-load: consume pendingZoomFitRef → auto zoomToFit (was dead code before)
+  // 2. Incremental: if graph extent grew >15% and user hasn't manually zoomed, refit
+  // 3. Pin all nodes' z to 0 so frozen layouts don't jitter on the Z axis.
   const onEngineStop = useCallback(() => {
-    pendingZoomFitRef.current = false
+    const fg = fgRef.current
+
+    if (pendingZoomFitRef.current) {
+      pendingZoomFitRef.current = false
+      if (fg && typeof fg.zoomToFit === 'function') {
+        fg.zoomToFit(300, 60)
+      }
+    } else if (pendingIncrementalRefitRef.current && !userZoomedRef.current) {
+      pendingIncrementalRefitRef.current = false
+      if (fg && typeof fg.getGraphBbox === 'function') {
+        const bbox = fg.getGraphBbox()
+        if (bbox) {
+          const bboxW = bbox.x[1] - bbox.x[0]
+          const bboxH = bbox.y[1] - bbox.y[0]
+          const newExtent = Math.max(bboxW, bboxH)
+          const prev = prevBboxExtentRef.current
+          if (prev > 0 && newExtent / prev > FG3D_REFIT_GROWTH_THRESHOLD) {
+            if (typeof fg.zoomToFit === 'function') {
+              fg.zoomToFit(300, 60)
+            }
+          }
+        }
+      }
+    } else {
+      pendingIncrementalRefitRef.current = false
+    }
+
     const data = useGraphStore.getState().graph3DData
     data.nodes.forEach((n: any) => {
       if (n.fx !== undefined && n.fy !== undefined && n.fz === undefined) {
@@ -297,18 +353,21 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
   }, [])
 
   const handleZoomIn = useCallback(() => {
+    userZoomedRef.current = true
     const fg = fgRef.current
     if (!fg || typeof fg.cameraPosition !== 'function') return
     const cam = fg.cameraPosition()
     fg.cameraPosition({ x: cam.x, y: cam.y, z: cam.z * 0.8 }, undefined, 200)
   }, [])
   const handleZoomOut = useCallback(() => {
+    userZoomedRef.current = true
     const fg = fgRef.current
     if (!fg || typeof fg.cameraPosition !== 'function') return
     const cam = fg.cameraPosition()
     fg.cameraPosition({ x: cam.x, y: cam.y, z: cam.z * 1.2 }, undefined, 200)
   }, [])
   const handleResetZoom = useCallback(() => {
+    userZoomedRef.current = false
     fgRef.current?.zoomToFit(300, 60)
   }, [])
 

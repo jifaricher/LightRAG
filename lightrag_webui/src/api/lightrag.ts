@@ -24,6 +24,7 @@ export type LightragEdgeType = {
 export type LightragGraphType = {
   nodes: LightragNodeType[]
   edges: LightragEdgeType[]
+  is_truncated?: boolean
 }
 
 export type LightragQueueStatus = {

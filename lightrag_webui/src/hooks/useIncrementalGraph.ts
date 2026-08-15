@@ -120,24 +120,34 @@ const useIncrementalGraph = () => {
         state.setIncrementalMessage(pipelineStatus.latest_message || '')
         state.setIsIncrementalBuilding(pipelineStatus.busy)
 
-        // Diff and merge
-        const { merged, newNodes, newEdges, updatedColorMap } = diffIntoGraphData(
-          state.graph3DData,
-          graphResp,
-          knownNodeIdsRef.current,
-          knownEdgeIdsRef.current,
-          state.typeColorMap
-        )
-
-        if (newNodes > 0 || newEdges > 0) {
-          noChangeStreakRef.current = 0
-          state.setGraph3DData(merged)
-          state.setGraph3DDataDelta({ newNodes, newEdges })
-          if (updatedColorMap.size > 0) {
-            state.setTypeColorMap(updatedColorMap)
-          }
-        } else {
+        // When the graph is truncated (node count exceeds MAX_GRAPH_NODES),
+        // the backend returns a BFS/popular-labels subset that shifts between
+        // polls as degrees change. Only run the diff on the first load (when
+        // we have no data yet); skip on subsequent polls to avoid spurious
+        // node churn that would corrupt the incremental animation.
+        const hasExistingData = state.graph3DData.nodes.length > 0
+        if (graphResp.is_truncated && hasExistingData) {
           noChangeStreakRef.current++
+        } else {
+          // Diff and merge
+          const { merged, newNodes, newEdges, updatedColorMap } = diffIntoGraphData(
+            state.graph3DData,
+            graphResp,
+            knownNodeIdsRef.current,
+            knownEdgeIdsRef.current,
+            state.typeColorMap
+          )
+
+          if (newNodes > 0 || newEdges > 0) {
+            noChangeStreakRef.current = 0
+            state.setGraph3DData(merged)
+            state.setGraph3DDataDelta({ newNodes, newEdges })
+            if (updatedColorMap.size > 0) {
+              state.setTypeColorMap(updatedColorMap)
+            }
+          } else {
+            noChangeStreakRef.current++
+          }
         }
 
         // Standby condition: pipeline not busy AND no new nodes for N

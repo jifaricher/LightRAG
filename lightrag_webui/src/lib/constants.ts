@@ -127,7 +127,7 @@ export const FG3D_D3_ALPHA_DECAY = 0.008
 export const FG3D_D3_VELOCITY_DECAY = 0.15
 export const FG3D_COOLDOWN_TICKS = 2000
 export const FG3D_NODE_REL_SIZE = 5
-export const FG3D_LINK_WIDTH = 1.5
+export const FG3D_LINK_WIDTH = 3
 // Above this node count, 3D labels are turned off (SpriteText per node is
 // expensive); 2D sigma stays the better choice for very large graphs.
 export const FG3D_NODE_PERF_LIMIT = 5000
@@ -150,6 +150,19 @@ export const FG3D_DROP_LINK_DISTANCE_START = 600
 // appear on a ring around the graph centroid and get pulled inward by the link
 // spring — "converge from edge to center" effect.
 export const FG3D_DROP_EDGE_RADIUS = 1200
+
+// --- Adaptive drop geometry (scale to graph bounding box) -------------------
+// Spawn radius and drop Z are scaled to the existing graph's XY extent so
+// the drop animation stays visible as the graph grows past the fixed
+// FG3D_DROP_EDGE_RADIUS / FG3D_DROP_INITIAL_Z floors.
+//   spawnRadius = max(extent * FG3D_DROP_RADIUS_SCALE, FG3D_DROP_EDGE_RADIUS)
+//   dropZ       = max(extent * FG3D_DROP_Z_SCALE, FG3D_DROP_INITIAL_Z)
+export const FG3D_DROP_RADIUS_SCALE = 0.6
+export const FG3D_DROP_Z_SCALE = 0.5
+// Incremental settle triggers a camera refit only if the graph's XY extent
+// grew by at least this factor (1.15 = 15%). Prevents refit churn when new
+// nodes landed inside the existing bounding box.
+export const FG3D_REFIT_GROWTH_THRESHOLD = 1.15
 
 // --- Charge repulsion (node spacing) ----------------------------------------
 // Lower (more negative) = stronger repulsion = more spread out.
