@@ -12,24 +12,37 @@ import { rawGraphTo3DData } from '@/utils/graph3dData'
  * takes over the store.graph3DData source when the pipeline is busy.
  *
  * The color map is committed to store.typeColorMap so the Legend stays in sync.
+ *
+ * IMPORTANT: the 3D data has NO nodes AND there is no rawGraph yet (first load).
+ * The "node count changed" guard at L31 prevents overwriting incremental data
+ * that was already populated by the poller before isIncrementalBuilding flipped
+ * back to false — but only when incremental data has MORE nodes than rawGraph.
+ * When incremental built up e.g. 200 nodes and rawGraph (stale, from an earlier
+ * 2D fetch) has 50, the guard correctly skips the overwrite.
+ *
+ * However, when the graph was CLEAR-AND-REBUILT (data reset), rawGraph may
+ * briefly have 0 nodes while incremental data also has 0 — the guard would
+ * pass and write empty data. This is fine because the poller will repopulate.
  */
 const useLightragGraph3D = () => {
   const rawGraph = useGraphStore.use.rawGraph()
   const graph3DData = useGraphStore.use.graph3DData()
   const isIncrementalBuilding = useGraphStore.use.isIncrementalBuilding()
 
-  // Only convert rawGraph → 3D when NOT in incremental building mode (the
-  // poller owns graph3DData then). Also skip if rawGraph hasn't loaded yet.
   useEffect(() => {
     if (isIncrementalBuilding) return
     if (!rawGraph) return
 
     const { data, updatedColorMap } = rawGraphTo3DData(rawGraph, useGraphStore.getState().typeColorMap)
 
-    // Only update if node count changed (avoid clobbering incremental state
-    // that might have been written before the building flag flipped).
+    // Guard: only overwrite if the static conversion has MORE nodes than
+    // what's already in the store. This prevents clobbering incremental
+    // data (which may have accumulated more nodes than the stale rawGraph)
+    // when isIncrementalBuilding flips to false after the pipeline finishes.
+    // The incremental poller remains the source of truth until the user
+    // manually refreshes the 2D graph (which sets rawGraph fresh).
     const current = useGraphStore.getState().graph3DData
-    if (current.nodes.length !== data.nodes.length || current.links.length !== data.links.length) {
+    if (data.nodes.length > current.nodes.length) {
       useGraphStore.getState().setGraph3DData(data)
     }
     if (updatedColorMap.size > 0) {

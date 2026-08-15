@@ -20,13 +20,18 @@ import {
  * one" visual effect.
  *
  * Since the backend has no SSE/WebSocket, polling is the only way to see new
- * entities as they're written. The poller stops after
+ * entities as they're written. The poller enters **standby** after
  * INCREMENTAL_NO_CHANGE_STOP_THRESHOLD consecutive polls with no new nodes AND
- * pipeline busy === false, confirming the build has converged.
+ * pipeline busy === false, confirming the current build has converged.
  *
- * The ForceGraph3DContainer reads store.graph3DData and calls the imperative
- * fg.graphData() to apply the delta (prop-driven updates would reset the entire
- * force simulation, undoing the incremental effect).
+ * In standby it continues polling (only getPipelineStatus, lightweight) so
+ * that when new documents are submitted and the pipeline becomes busy again,
+ * full diffing resumes automatically — the drop-spring animation restarts for
+ * the new batch without requiring a 2D↔3D toggle.
+ *
+ * The ForceGraph3DContainer reads store.graph3DData and applies deltas via
+ * the graphData prop. Existing nodes are pinned (fx/fy/fz) so only new nodes
+ * animate.
  */
 const useIncrementalGraph = () => {
   const enableIncrementalBuild = useSettingsStore.use.enableIncrementalBuild()
@@ -37,10 +42,15 @@ const useIncrementalGraph = () => {
   const knownEdgeIdsRef = useRef<Set<string>>(new Set())
   const noChangeStreakRef = useRef(0)
   const isPollingRef = useRef(false)
+  // standbyRef: true once the current build has converged. While in standby,
+  // the tick only calls getPipelineStatus (cheap). When the pipeline goes busy
+  // again, standby is cleared and full graph diffing resumes.
+  const standbyRef = useRef(false)
 
   useEffect(() => {
-    // Only poll in 3D mode with incremental build enabled
-    if (graphViewMode !== '3d' || !enableIncrementalBuild) {
+    // Only poll in 3D or 2.5D mode with incremental build enabled
+    const is3DLike = graphViewMode === '3d' || graphViewMode === '2.5d'
+    if (!is3DLike || !enableIncrementalBuild) {
       if (intervalRef.current) {
         clearInterval(intervalRef.current)
         intervalRef.current = null
@@ -59,6 +69,7 @@ const useIncrementalGraph = () => {
     // doesn't clobber our incremental data with a full static load.
     useGraphStore.getState().setGraph3DData({ nodes: [], links: [] })
     useGraphStore.getState().setIsIncrementalBuilding(true)
+    standbyRef.current = false
 
     let cancelled = false
 
@@ -68,7 +79,31 @@ const useIncrementalGraph = () => {
 
       try {
         const state = useGraphStore.getState()
-        // Use settings from store for label/depth/maxNodes
+
+        // Standby path: only fetch pipeline status. When the pipeline becomes
+        // busy again (new documents submitted), exit standby and resume full
+        // graph diffing on the next tick.
+        if (standbyRef.current) {
+          const pipelineStatus = await getPipelineStatus()
+          if (cancelled) return
+          state.setIncrementalMessage(pipelineStatus.latest_message || '')
+          if (pipelineStatus.busy) {
+            // New batch detected — resume full polling.
+            // Reset known-id sets and clear 3D data so all nodes animate in
+            // from far Z (fresh first-load drop) instead of being treated as
+            // already-known (the stale known sets from the previous batch
+            // would silently drop nodes that aren't in prevData anymore).
+            standbyRef.current = false
+            noChangeStreakRef.current = 0
+            knownNodeIdsRef.current = new Set()
+            knownEdgeIdsRef.current = new Set()
+            state.setGraph3DData({ nodes: [], links: [] })
+            state.setIsIncrementalBuilding(true)
+          }
+          return
+        }
+
+        // Active path: fetch both graph data and pipeline status
         const settings = useSettingsStore.getState()
         const label = settings.queryLabel || '*'
         const maxDepth = settings.graphQueryMaxDepth
@@ -105,15 +140,15 @@ const useIncrementalGraph = () => {
           noChangeStreakRef.current++
         }
 
-        // Stop condition: pipeline not busy AND no new nodes for N consecutive polls
+        // Standby condition: pipeline not busy AND no new nodes for N
+        // consecutive polls. The interval stays alive but switches to the
+        // lightweight standby path so a future busy=true (new documents)
+        // resumes the animation automatically.
         if (
           !pipelineStatus.busy &&
           noChangeStreakRef.current >= INCREMENTAL_NO_CHANGE_STOP_THRESHOLD
         ) {
-          if (intervalRef.current) {
-            clearInterval(intervalRef.current)
-            intervalRef.current = null
-          }
+          standbyRef.current = true
           state.setIsIncrementalBuilding(false)
         }
       } catch (e) {

@@ -122,11 +122,12 @@ export const workerBudgetMs = (order: number): number => Math.min(1500 + order /
 // --- 3D force-graph (react-force-graph + three + d3-force-3d) ----------------
 // alpha_decay controls how fast the simulation loses energy and settles.
 // Lower = longer animation. velocity_decay lower = slower, gentler movement.
-export const FG3D_D3_ALPHA_DECAY = 0.008
-export const FG3D_D3_VELOCITY_DECAY = 0.003
-export const FG3D_COOLDOWN_TICKS = 400
-export const FG3D_NODE_REL_SIZE = 3
-export const FG3D_LINK_WIDTH = 1
+// Higher values = faster convergence so entities snap in and stop quickly.
+export const FG3D_D3_ALPHA_DECAY = 0.05
+export const FG3D_D3_VELOCITY_DECAY = 0.4
+export const FG3D_COOLDOWN_TICKS = 2000
+export const FG3D_NODE_REL_SIZE = 5
+export const FG3D_LINK_WIDTH = 1.5
 // Above this node count, 3D labels are turned off (SpriteText per node is
 // expensive); 2D sigma stays the better choice for very large graphs.
 export const FG3D_NODE_PERF_LIMIT = 5000
@@ -135,26 +136,45 @@ export const FG3D_NODE_PERF_LIMIT = 5000
 // New nodes spawn at a high altitude and "fall" into place, snapped by links
 // like a spring. Tweak these for the desired visual effect.
 //   INITIAL_Y  -1800 → strong drop impact; -800 → gentle settle
-//   INITIAL_VY  0.3 → slow fall; 1.0 → fast drop
+//   INITIAL_VZ  0.00075 → slow drill; higher → fast drill
 //   LINK_STRENGTH 0.6 → soft spring, gentle pull; 1.0 → hard snap "啪"
 //   ALPHA_DECAY 0.005 → long oscillation; 0.025 → fast convergence
-export const FG3D_DROP_INITIAL_Y = -3600
-export const FG3D_DROP_INITIAL_VY = 0.00075
-export const FG3D_DROP_LINK_STRENGTH = 0.2
+export const FG3D_DROP_INITIAL_Z = 6000
+export const FG3D_DROP_INITIAL_VZ = 0.005
+export const FG3D_DROP_LINK_STRENGTH = 0.3
 export const FG3D_DROP_LINK_DISTANCE = 30
 // Link distance starts at this value (large) and shrinks to FG3D_DROP_LINK_DISTANCE
 // as the simulation converges, creating a "pull-together" visual.
-export const FG3D_DROP_LINK_DISTANCE_START = 300
+export const FG3D_DROP_LINK_DISTANCE_START = 600
+// Radius for new-node spawn on the outer edge of the existing graph. New nodes
+// appear on a ring around the graph centroid and get pulled inward by the link
+// spring — "converge from edge to center" effect.
+export const FG3D_DROP_EDGE_RADIUS = 1200
 
 // --- Charge repulsion (node spacing) ----------------------------------------
 // Lower (more negative) = stronger repulsion = more spread out.
 // -30 is d3-force default; -10 keeps the graph compact without overlapping.
 export const FG3D_CHARGE_STRENGTH = -5
 
+// --- 2.5D force-graph (俯视平面 + Z轴坠落动画) -----------------------------
+// Steady state: all nodes on z=0 plane, camera looks down → looks like 2D.
+// New nodes drop from large positive z (toward viewer) into the z=0 plane,
+// creating a "drilling into screen" effect.
+// forceZ pulls all nodes' z toward 0; link spring + forceZ converge droppers.
+export const FG3D25D_FORCE_Z_STRENGTH = 0.45
+export const FG3D25D_DROP_INITIAL_Z = 4000
+export const FG3D25D_DROP_INITIAL_VZ = 0.005
+export const FG3D25D_DROP_LINK_STRENGTH = 0.3
+export const FG3D25D_DROP_LINK_DISTANCE = 30
+export const FG3D25D_DROP_LINK_DISTANCE_START = 400
+export const FG3D25D_DROP_EDGE_RADIUS = 1200
+export const FG3D25D_CHARGE_STRENGTH = -15
+export const FG3D25D_CAMERA_POSITION = { x: 0, y: -300, z: 700 }
+
 // --- Incremental build polling ----------------------------------------------
 // Interval between GET /graphs polls while the pipeline is busy. Backed by no
 // SSE/WebSocket on the server, polling is the only way to see new entities.
-export const INCREMENTAL_POLL_INTERVAL_MS = 2500
+export const INCREMENTAL_POLL_INTERVAL_MS = 300
 // Stop polling after this many consecutive polls with no new nodes AND
 // pipeline busy === false, confirming the build has converged.
 export const INCREMENTAL_NO_CHANGE_STOP_THRESHOLD = 2

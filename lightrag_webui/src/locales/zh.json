@@ -204,6 +204,7 @@
     "graphBuildFailed": "渲染图数据失败。请刷新后重试。",
     "viewMode": {
       "2d": "2D 视图",
+      "25d": "2.5D 视图",
       "3d": "3D 视图"
     },
     "incremental": {

@@ -13,7 +13,7 @@ import {
 import { NodeBorderProgram } from '@sigma/node-border'
 import { EdgeCurvedArrowProgram, createEdgeCurveProgram } from '@sigma/edge-curve'
 import { useTranslation } from 'react-i18next'
-import { Box, Layers } from 'lucide-react'
+import { Box, Layers, Boxes } from 'lucide-react'
 
 import FocusOnNode from '@/components/graph/FocusOnNode'
 import LayoutsControl from '@/components/graph/LayoutsControl'
@@ -31,6 +31,7 @@ import LegendButton from '@/components/graph/LegendButton'
 import Button from '@/components/ui/Button'
 
 import GraphViewer3D from '@/features/GraphViewer3D'
+import GraphViewer25D from '@/features/GraphViewer25D'
 
 import { useSettingsStore } from '@/stores/settings'
 import { useGraphStore } from '@/stores/graph'
@@ -270,7 +271,7 @@ const GraphViewer = () => {
   // We null sigmaGraph (but keep rawGraph) so GraphControl's binding effect
   // won't fire prematurely on the old graph when returning to 2D.
   useEffect(() => {
-    if (graphViewMode === '3d') {
+    if (graphViewMode === '3d' || graphViewMode === '2.5d') {
       const state = useGraphStore.getState()
       state.setSigmaGraph(null)
       state.setGraphDataFetchAttempted(false)
@@ -279,6 +280,9 @@ const GraphViewer = () => {
 
   if (graphViewMode === '3d') {
     return <GraphViewer3D />
+  }
+  if (graphViewMode === '2.5d') {
+    return <GraphViewer25D />
   }
 
   // Key forces SigmaContainer + all children (useLightragGraph, GraphControl)
@@ -317,7 +321,7 @@ const GraphViewer = () => {
           <FullScreenControl />
           <LegendButton />
           <Settings />
-          {/* 2D/3D view toggle */}
+          {/* 2D/2.5D/3D view toggle */}
           <Button
             variant={graphViewMode === '2d' ? 'secondary' : controlButtonVariant}
             size="icon"
@@ -325,6 +329,14 @@ const GraphViewer = () => {
             tooltip={t('graphPanel.viewMode.2d', '2D View')}
           >
             <Layers />
+          </Button>
+          <Button
+            variant={graphViewMode === '2.5d' ? 'secondary' : controlButtonVariant}
+            size="icon"
+            onClick={() => setGraphViewMode('2.5d')}
+            tooltip={t('graphPanel.viewMode.25d', '2.5D View')}
+          >
+            <Boxes />
           </Button>
           <Button
             variant={graphViewMode === '3d' ? 'secondary' : controlButtonVariant}

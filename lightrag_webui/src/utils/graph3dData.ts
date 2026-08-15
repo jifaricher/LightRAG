@@ -1,6 +1,7 @@
 import { resolveNodeColor, DEFAULT_NODE_COLOR } from '@/utils/graphColor'
 import type { LightragGraphType } from '@/api/lightrag'
 import type { RawGraph, Graph3DData, Graph3DNode, Graph3DLink } from '@/stores/graph'
+import { FG3D_DROP_INITIAL_Z, FG3D_DROP_INITIAL_VZ } from '@/lib/constants'
 
 // Parse an edge's `weight` property into a finite number, preserving a
 // legitimate 0. `Number(x) || 1` would coerce a real weight of 0 (the thinnest
@@ -239,6 +240,26 @@ export function diffIntoGraphData(
         existing.val = range > 0
           ? Math.round(minSize + (maxSize - minSize) * Math.pow((degree - minDegree) / range, 0.5))
           : minSize
+      } else {
+        // ID was known but prevData was cleared (e.g. data reset). Treat as
+        // new: push with drop coordinates so it animates in from far Z.
+        const name = safeNodeLabel(apiNode.labels, apiNode.id)
+        const degree = degreeMap.get(apiNode.id) ?? 0
+        const size = range > 0
+          ? Math.round(minSize + (maxSize - minSize) * Math.pow((degree - minDegree) / range, 0.5))
+          : minSize
+        mergedNodes.push({
+          id: apiNode.id,
+          name,
+          label: name,
+          color,
+          val: size,
+          entity_type: entityType,
+          properties: apiNode.properties,
+          z: FG3D_DROP_INITIAL_Z,
+          vz: FG3D_DROP_INITIAL_VZ
+        })
+        newNodes++
       }
     } else {
       const name = safeNodeLabel(apiNode.labels, apiNode.id)
@@ -247,6 +268,8 @@ export function diffIntoGraphData(
         ? Math.round(minSize + (maxSize - minSize) * Math.pow((degree - minDegree) / range, 0.5))
         : minSize
       // New node: no coordinates — react-force-graph will initialize it.
+      // Set z/vz for the drill-into-screen drop effect directly here,
+      // so new nodes start falling immediately regardless of effect timing.
       mergedNodes.push({
         id: apiNode.id,
         name,
@@ -254,7 +277,9 @@ export function diffIntoGraphData(
         color,
         val: size,
         entity_type: entityType,
-        properties: apiNode.properties
+        properties: apiNode.properties,
+        z: FG3D_DROP_INITIAL_Z,
+        vz: FG3D_DROP_INITIAL_VZ
       })
       knownNodeIds.add(apiNode.id)
       newNodes++

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react'
 import { ForceGraph3D } from 'react-force-graph'
+import { forceZ } from 'd3-force-3d'
 import SpriteText from 'three-spritetext'
 import { useTranslation } from 'react-i18next'
 import { useGraphStore } from '@/stores/graph'
@@ -11,13 +12,15 @@ import {
   FG3D_NODE_REL_SIZE,
   FG3D_LINK_WIDTH,
   FG3D_NODE_PERF_LIMIT,
-  FG3D_DROP_INITIAL_Z,
-  FG3D_DROP_INITIAL_VZ,
-  FG3D_DROP_LINK_STRENGTH,
-  FG3D_DROP_LINK_DISTANCE,
-  FG3D_DROP_LINK_DISTANCE_START,
-  FG3D_DROP_EDGE_RADIUS,
-  FG3D_CHARGE_STRENGTH,
+  FG3D25D_FORCE_Z_STRENGTH,
+  FG3D25D_DROP_INITIAL_Z,
+  FG3D25D_DROP_INITIAL_VZ,
+  FG3D25D_DROP_LINK_STRENGTH,
+  FG3D25D_DROP_LINK_DISTANCE,
+  FG3D25D_DROP_LINK_DISTANCE_START,
+  FG3D25D_DROP_EDGE_RADIUS,
+  FG3D25D_CHARGE_STRENGTH,
+  FG3D25D_CAMERA_POSITION,
   controlButtonVariant
 } from '@/lib/constants'
 import useIsDarkMode from '@/hooks/useIsDarkMode'
@@ -25,14 +28,11 @@ import Button from '@/components/ui/Button'
 import { ZoomIn, ZoomOut, Maximize } from 'lucide-react'
 import * as THREE from 'three'
 
-interface ForceGraph3DContainerProps {
+interface ForceGraph25DContainerProps {
   onNodeClick?: (node: any) => void
   onBackgroundClick?: () => void
 }
 
-// Parse a hex color string into an RGB object {r, g, b} in 0-1 range,
-// suitable for THREE.Color-like usage without creating Color objects
-// (cheaper for per-node allocation in large graphs).
 const hexToRgb = (hex: string) => {
   const h = hex.replace('#', '')
   return {
@@ -43,26 +43,17 @@ const hexToRgb = (hex: string) => {
 }
 
 /**
- * react-force-graph 3D wrapper with premium Hermes-style visuals.
+ * 2.5D force-graph wrapper — steady state is a flat z=0 plane (looks like 2D
+ * from the top-down camera), but new nodes drop in from z+y mixed far distance
+ * with a 3D spring animation.
  *
- * Visual enhancements over the default react-force-graph:
- * - Three.js scene lighting (ambient + directional + point) so nodes
- *   with MeshStandardMaterial catch light and have depth
- * - Nodes use emissive materials for a subtle glow
- * - Links are semi-transparent and wider for a "constellation" feel
- * - Node labels (SpriteText) are larger with background for readability
- * - Camera starts further back for a wide overview shot
- * - Hover highlights the node by scaling it up
- *
- * Key design: uses the IMPERATIVE API (fgRef.current.graphData()) to push
- * incremental data updates, NOT the graphData prop. Prop-driven updates cause
- * react-force-graph to rebuild the entire d3 force simulation (every node
- * re-initialized to a random position → "full re-jitter" instead of "new nodes
- * springing in"). The imperative path preserves existing node coordinates by
- * node.id match, so d3-force-3d only nudges existing nodes while new ones
- * animate into place.
+ * Key difference from ForceGraph3DContainer:
+ * - Injects d3-force-3d `forceZ(0)` to pull all nodes toward z=0 plane
+ * - New nodes spawn at z=2000 + y=-2000 (mixed-depth drop trajectory)
+ * - Existing nodes are pinned with fz=0 (locked to the plane)
+ * - Camera is positioned for a top-down view with slight perspective
  */
-const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DContainerProps) => {
+const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25DContainerProps) => {
   const fgRef = useRef<any>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const [dims, setDims] = useState({ width: 800, height: 600 })
@@ -72,35 +63,24 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
   const show3DNodeLabel = useSettingsStore.use.show3DNodeLabel()
   const { t } = useTranslation()
 
-  // Track whether the initial data has been fed via prop (first mount only)
   const initializedRef = useRef(false)
 
   // Whether we're waiting for the simulation to settle before calling zoomToFit
   const pendingZoomFitRef = useRef(false)
 
-  // Whether the current run is the first load (full drop animation) vs
-  // incremental (only new nodes/links animate, existing graph frozen)
-  const isFirstLoadRunRef = useRef(false)
-
-  // Reset initialization flag when graph3DData is cleared (e.g. when the
-  // incremental poller starts and clears existing data for a fresh drop-in)
   useEffect(() => {
     if (graph3DData.nodes.length === 0) {
       initializedRef.current = false
     }
   }, [graph3DData])
 
-  // Hovered node id for highlight state
-  const hoverNodeRef = useRef<string | null>(null)
-
-  // Register fg ref on window for LayoutsControl3D to access.
-  // Done in onEngineTick since fgRef.current is available by then.
-  // Cleanup on unmount.
+  // Cleanup window ref on unmount
   useEffect(() => {
     return () => { delete (window as any).__forceGraph3DRef }
   }, [])
 
-  // Measure the actual container element instead of using window dimensions.
+  const hoverNodeRef = useRef<string | null>(null)
+
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -114,12 +94,6 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
     return () => ro.disconnect()
   }, [])
 
-  // Scene lighting — set once after the engine starts ticking.
-  // react-force-graph's fromKapsule wrapper only forwards a limited set of
-  // instance methods through the ref (scene, camera, d3Force, zoomToFit, etc.).
-  // d3AlphaDecay / d3VelocityDecay / cooldownTicks are PROPS, not methods —
-  // calling them on the instance throws "not a function" and crashes the
-  // onEngineTick callback, so lights never get added and nodes stay invisible.
   const lightingSetupRef = useRef(false)
   const onEngineTick = useCallback(() => {
     const fg = fgRef.current
@@ -130,22 +104,22 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
       ;(window as any).__forceGraph3DRef = fg
     }
 
-    // --- One-time setup: link strength, charge, lighting ---
+    // --- One-time setup: link strength, charge, forceZ, lighting ---
     if (!lightingSetupRef.current) {
-      // Configure the link force strength
       const forceLink0 = fg.d3Force('link')
       if (forceLink0) {
-        forceLink0.strength(FG3D_DROP_LINK_STRENGTH)
-        forceLink0.distance(FG3D_DROP_LINK_DISTANCE_START)
+        forceLink0.strength(FG3D25D_DROP_LINK_STRENGTH)
+        forceLink0.distance(FG3D25D_DROP_LINK_DISTANCE_START)
       }
 
-      // Reduce charge repulsion so nodes cluster more tightly
       const forceCharge = fg.d3Force('charge')
       if (forceCharge) {
-        forceCharge.strength(FG3D_CHARGE_STRENGTH)
+        forceCharge.strength(FG3D25D_CHARGE_STRENGTH)
       }
 
-      // Add Three.js lighting so MeshStandardMaterial nodes have depth.
+      // === 2.5D key: inject forceZ to pull all nodes toward z=0 plane ===
+      fg.d3Force('z', forceZ(0).strength(FG3D25D_FORCE_Z_STRENGTH))
+
       const scene = fg.scene()
       if (scene) {
         const ambient = new THREE.AmbientLight(isDarkMode ? 0x404060 : 0xffffff, isDarkMode ? 0.6 : 0.8)
@@ -164,40 +138,24 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
     }
 
     // --- Every tick: shrink link distance as simulation converges ---
-    // d3 alpha starts at 1 (full energy) and decays toward 0 (settled).
-    // We interpolate link distance from START (large) → TARGET (per-edge)
-    // so links are long at first and gradually pull nodes together.
     // Per-edge target distance scales with edge weight: high-weight edges
-    // (strong relations) settle short, low-weight edges settle long —
-    // mimicking 2D ForceAtlas2's natural long/short link variation.
+    // settle short, low-weight edges settle long — like 2D ForceAtlas2.
     const forceLink = fg.d3Force('link')
     if (forceLink) {
       const alpha = typeof forceLink.alpha === 'function' ? forceLink.alpha() : 1
-      const t = 1 - alpha // 0 → 1 as simulation converges
-      const startDist = FG3D_DROP_LINK_DISTANCE_START
-      const baseDist = FG3D_DROP_LINK_DISTANCE
+      const t = 1 - alpha
+      const startDist = FG3D25D_DROP_LINK_DISTANCE_START
+      const baseDist = FG3D25D_DROP_LINK_DISTANCE
       forceLink.distance((link: any) => {
-        // weight is stored on the link object (parseEdgeWeight, default 1)
         const w = typeof link.width === 'number' ? link.width : 1
-        // Higher weight → shorter distance (tight relation)
-        // Lower weight → longer distance (loose relation)
-        // Scale: weight 1 → 2x base, weight 5 → 1x base, weight 10 → 0.5x base
         const targetDist = baseDist * (2 / Math.max(1, w * 0.5))
         return startDist * (1 - t) + targetDist * t
       })
     }
   }, [isDarkMode])
 
-  // Imperative incremental update — applies the drop-spring animation
-  // to newly added nodes (spawn at high altitude, fall into place).
-  // Triggers on any graph3DData change (both static load and incremental delta).
-  //
-  // NOTE: react-force-graph's fromKapsule wrapper does NOT forward
-  // `graphData()` as an instance method through the ref. The only way to
-  // update data is through the `graphData` prop. However, prop-driven updates
-  // cause the internal ThreeForceGraph to diff by node id and preserve
-  // existing node coordinates — so the drop-spring animation still works
-  // as long as we set y/vy on the nodes before passing them.
+  // Drop-spring animation: new nodes drill into screen from far z (toward
+  // viewer) into the z=0 plane. Existing nodes are pinned with fz=0.
   useEffect(() => {
     const currentData = useGraphStore.getState().graph3DData
     if (currentData.nodes.length === 0) return
@@ -205,23 +163,17 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
     const isFirstLoad = !initializedRef.current
 
     if (isFirstLoad) {
-      // First load: initialize all nodes at far z (toward viewer) for a
-      // dramatic "drilling into screen" effect, then let spring snap them to z≈0
+      // First load: all nodes drill in from far z
       currentData.nodes.forEach((n: any) => {
-        n.z = FG3D_DROP_INITIAL_Z
-        n.vz = FG3D_DROP_INITIAL_VZ
+        n.z = FG3D25D_DROP_INITIAL_Z
+        n.vz = FG3D25D_DROP_INITIAL_VZ
       })
       initializedRef.current = true
-      isFirstLoadRunRef.current = true
     } else {
-      // Incremental: pin existing nodes in place (fx/fy/fz) so only new
-      // nodes animate — the rest of the graph stays perfectly still.
+      // Incremental: pin existing nodes (XY locked, z forced to 0 plane)
       // New nodes spawn on a ring around the graph centroid (outer edge)
       // at far Z, then get pulled inward by the link spring — "converge
       // from edge to center" effect.
-      isFirstLoadRunRef.current = false
-
-      // Compute centroid of existing nodes
       let cx = 0, cy = 0, count = 0
       for (const n of currentData.nodes) {
         if (n.x !== undefined && n.y !== undefined) {
@@ -232,14 +184,13 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
       }
       if (count > 0) { cx /= count; cy /= count }
 
-      // Distribute new nodes evenly around the ring
       let angleIdx = 0
       currentData.nodes.forEach((n: any) => {
         if (n.x !== undefined && n.y !== undefined) {
-          // Existing node: fix its position so the simulation doesn't move it
+          // Existing node: pin XY, force z=0 plane
           n.fx = n.x
           n.fy = n.y
-          n.fz = n.z ?? 0
+          n.fz = 0
           n.vx = 0
           n.vy = 0
           n.vz = 0
@@ -247,12 +198,12 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
           // New node: spawn on outer ring around centroid, far Z for drop
           const angle = (angleIdx * 137.5) * Math.PI / 180 // golden angle for even spread
           angleIdx++
-          n.x = cx + FG3D_DROP_EDGE_RADIUS * Math.cos(angle)
-          n.y = cy + FG3D_DROP_EDGE_RADIUS * Math.sin(angle)
-          n.z = FG3D_DROP_INITIAL_Z
+          n.x = cx + FG3D25D_DROP_EDGE_RADIUS * Math.cos(angle)
+          n.y = cy + FG3D25D_DROP_EDGE_RADIUS * Math.sin(angle)
+          n.z = FG3D25D_DROP_INITIAL_Z
           n.vx = 0
           n.vy = 0
-          n.vz = FG3D_DROP_INITIAL_VZ
+          n.vz = FG3D25D_DROP_INITIAL_VZ
         }
       })
     }
@@ -260,10 +211,12 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
     const fg = fgRef.current
     if (fg) {
       if (isFirstLoad) {
-        // Full reheat for first load — all nodes need to animate
         if (typeof fg.d3ReheatSimulation === 'function') {
           fg.d3ReheatSimulation()
         }
+        // zoomToFit is called from onEngineStop after the simulation settles,
+        // so it fits the bounding box of converged nodes (z=0 plane) instead
+        // of the initial far-z positions which would make the graph tiny.
         pendingZoomFitRef.current = true
       } else {
         // Incremental: moderate alpha so new nodes snap in quickly but
@@ -277,24 +230,14 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
     }
   }, [graph3DData])
 
-  // Node 3D object: glowing sphere with SpriteText label.
-  // Each node gets a MeshStandardMaterial so it catches the scene lighting
-  // and has a subtle emissive glow — the "premium" look from Hermes/HOB.
   const nodeThreeObject = useCallback(
     (node: any) => {
-      // Global toggle: when show3DNodeLabel is off, no labels at all
       if (!show3DNodeLabel) return undefined
-
       const showLabels = graph3DData.nodes.length <= FG3D_NODE_PERF_LIMIT
       if (!showLabels) return undefined
-
-      // Only show label for nodes with val above a threshold (avoid clutter)
       if (node.val < 5) return undefined
 
-      // Group: sphere mesh (label sits above it)
       const group = new THREE.Group()
-
-      // Label sprite — larger text with subtle background for readability
       const label = node.label || node.name || node.id
       const sprite = new SpriteText(label, 14, isDarkMode ? '#e0e0ff' : '#1a1a2e')
       sprite.textHeight = 8
@@ -304,14 +247,11 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
       sprite.borderWidth = 1
       sprite.position.y = 8
       group.add(sprite)
-
       return group
     },
     [graph3DData.nodes.length, isDarkMode, show3DNodeLabel]
   )
 
-  // Node material: MeshStandardMaterial with emissive glow.
-  // Called per node by react-force-graph via the `nodeMaterial` prop.
   const nodeMaterial = useCallback((node: any) => {
     const rgb = hexToRgb(node.color || '#4488ff')
     const mat = new THREE.MeshStandardMaterial({
@@ -326,7 +266,6 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
     return mat
   }, [])
 
-  // Link material: semi-transparent for a "constellation" feel
   const linkMaterial = useCallback(() => {
     const mat = new THREE.LineBasicMaterial({
       color: isDarkMode ? 0x4a6fa5 : 0x8899bb,
@@ -337,28 +276,26 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
     return mat
   }, [isDarkMode])
 
-  // Hover highlight: scale up hovered node
   const handleNodeHover = useCallback((node: any) => {
     hoverNodeRef.current = node?.id ?? null
   }, [])
 
-  // Called once when the d3 simulation settles. Pin frozen-layout nodes'
-  // z to 0 so they don't keep jittering from residual link/charge forces
-  // after the drop animation completes.
+  // Called once when the d3 simulation settles. Pin all nodes' z to 0 so
+  // frozen layouts (Circular, Circlepack, Random) that deleted fz for the
+  // drop animation don't keep jittering on the Z axis due to link/forceZ
+  // residual forces fighting each other.
   const onEngineStop = useCallback(() => {
     pendingZoomFitRef.current = false
     const data = useGraphStore.getState().graph3DData
     data.nodes.forEach((n: any) => {
       if (n.fx !== undefined && n.fy !== undefined && n.fz === undefined) {
-        n.fz = n.z ?? 0
+        n.fz = 0
+        n.z = 0
         n.vz = 0
       }
     })
   }, [])
 
-  // Zoom controls (imperative). 3D ForceGraph has no zoom() method,
-  // only zoomToFit and cameraPosition. We use cameraPosition to dolly
-  // in/out along the z-axis.
   const handleZoomIn = useCallback(() => {
     const fg = fgRef.current
     if (!fg || typeof fg.cameraPosition !== 'function') return
@@ -374,14 +311,6 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
   const handleResetZoom = useCallback(() => {
     fgRef.current?.zoomToFit(300, 60)
   }, [])
-
-  // Data flows through the graphData prop (prop-driven). The fromKapsule
-  // wrapper does NOT forward graphData() as an instance method through the
-  // ref, so imperative updates are not possible. Instead, the internal
-  // ThreeForceGraph diffs by node id on prop changes and preserves existing
-  // node coordinates (x/y/z/vx/vy/vz), which is exactly what we need for
-  // the drop-spring animation: new nodes get y/vy set in the effect above,
-  // existing nodes keep their simulated positions.
 
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden">
@@ -416,7 +345,7 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
         width={dims.width}
         height={dims.height}
         pixelRatio={typeof window !== 'undefined' ? window.devicePixelRatio : 1}
-        cameraPosition={{ x: 0, y: 0, z: 400 }}
+        cameraPosition={FG3D25D_CAMERA_POSITION}
         enableNodeDrag={true}
         showNavHint={false}
       />
@@ -462,4 +391,4 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
   )
 }
 
-export default ForceGraph3DContainer
+export default ForceGraph25DContainer

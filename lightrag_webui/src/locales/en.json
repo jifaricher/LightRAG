@@ -204,6 +204,7 @@
     "graphBuildFailed": "Failed to render graph data. Use refresh to retry.",
     "viewMode": {
       "2d": "2D View",
+      "25d": "2.5D View",
       "3d": "3D View"
     },
     "incremental": {

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useSettingsStore } from '@/stores/settings'
 import { Box, Layers, Boxes, Type } from 'lucide-react'
 
-import ForceGraph3DContainer from '@/components/graph3d/ForceGraph3DContainer'
+import ForceGraph25DContainer from '@/components/graph3d/ForceGraph25DContainer'
 import { useGraph3DEventHandlers } from '@/components/graph3d/Graph3DControl'
 import IncrementalBuildOverlay from '@/components/graph3d/IncrementalBuildOverlay'
 import LayoutsControl3D from '@/components/graph3d/LayoutsControl3D'
@@ -22,25 +22,14 @@ import { controlButtonVariant } from '@/lib/constants'
 import Button from '@/components/ui/Button'
 
 /**
- * 3D force-graph viewer (react-force-graph + Three.js + d3-force-3d).
- *
- * Layout mirrors the 2D GraphViewer: force-graph canvas fills the container,
- * with floating control panels (labels, properties, legend) overlaid
- * absolutely. Engine-agnostic components (GraphLabels, PropertiesView, Legend,
- * SettingsDisplay) are reused unchanged — they read from the same store.
- *
- * Two data paths converge on store.graph3DData:
- * - Static (pipeline idle): useLightragGraph3D converts rawGraph → 3D format.
- * - Incremental (pipeline busy): useIncrementalGraph polls GET /graphs every
- *   2.5s, diffs new nodes/edges, and pushes them in via imperative API.
- *
- * The incremental path produces the "entities appearing one by one" animation:
- * d3-force-3d springs new nodes into place while nudging existing ones.
+ * 2.5D force-graph viewer — steady state is a flat z=0 plane (looks like 2D
+ * from top-down camera), but new entities drop in from z+y mixed far distance
+ * with 3D spring animation. Reuses the same store, hooks, and overlay panels
+ * as GraphViewer3D; only the container component differs.
  */
-const GraphViewer3D = () => {
+const GraphViewer25D = () => {
   const { t } = useTranslation()
 
-  // Hooks: static data conversion + incremental polling
   useLightragGraph3D()
   useIncrementalGraph()
 
@@ -54,9 +43,8 @@ const GraphViewer3D = () => {
   const graphViewMode = useSettingsStore.use.graphViewMode()
   const setGraphViewMode = useSettingsStore.use.setGraphViewMode()
 
-  // Placeholder: FullScreenControl in 3D uses the container element
   const handleFullScreen = useCallback(() => {
-    const el = document.querySelector('.force-graph-3d-container')
+    const el = document.querySelector('.force-graph-25d-container')
     if (!el) return
     if (document.fullscreenElement) {
       document.exitFullscreen()
@@ -66,8 +54,8 @@ const GraphViewer3D = () => {
   }, [])
 
   return (
-    <div className="force-graph-3d-container relative h-full w-full overflow-hidden">
-      <ForceGraph3DContainer
+    <div className="force-graph-25d-container relative h-full w-full overflow-hidden">
+      <ForceGraph25DContainer
         onNodeClick={handleNodeClick}
         onBackgroundClick={handleBackgroundClick}
       />
@@ -150,4 +138,4 @@ const GraphViewer3D = () => {
   )
 }
 
-export default GraphViewer3D
+export default GraphViewer25D

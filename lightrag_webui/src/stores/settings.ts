@@ -7,7 +7,7 @@ import { Message, QueryRequest } from '@/api/lightrag'
 type Theme = 'dark' | 'light' | 'system'
 type Language = 'en' | 'zh' | 'fr' | 'ar' | 'zh_TW' | 'ru' | 'ja' | 'de' | 'uk' | 'ko' | 'vi'
 type Tab = 'documents' | 'knowledge-graph' | 'retrieval' | 'api'
-type GraphViewMode = '2d' | '3d'
+type GraphViewMode = '2d' | '3d' | '2.5d'
 
 interface SettingsState {
   // Document manager settings
@@ -250,7 +250,7 @@ const useSettingsStoreBase = create<SettingsState>()(
     {
       name: 'settings-storage',
       storage: createJSONStorage(() => localStorage),
-      version: 22,
+      version: 23,
       migrate: (state: any, version: number) => {
         if (version < 2) {
           state.showEdgeLabel = false
@@ -371,6 +371,10 @@ const useSettingsStoreBase = create<SettingsState>()(
         if (version < 22) {
           // 3D node label visibility toggle
           state.show3DNodeLabel = true
+        }
+        if (version < 23) {
+          // 2.5D view mode — '2.5d' is a new optional value of graphViewMode,
+          // no new persisted field needed. Bump version for type change awareness.
         }
         return state
       }
