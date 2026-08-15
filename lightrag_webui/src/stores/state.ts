@@ -81,15 +81,20 @@ const useBackendStateStoreBase = create<BackendState>()((set, get) => ({
         if (!isNaN(maxNodes) && maxNodes > 0) {
           const currentBackendMaxNodes = useSettingsStore.getState().backendMaxGraphNodes
 
-          // Only update if the backend limit has actually changed
+          // Update backend limit if changed
           if (currentBackendMaxNodes !== maxNodes) {
             useSettingsStore.getState().setBackendMaxGraphNodes(maxNodes)
+          }
 
-            // Auto-adjust current graphMaxNodes if it exceeds the new backend limit
-            const currentMaxNodes = useSettingsStore.getState().graphMaxNodes
-            if (currentMaxNodes > maxNodes) {
-              useSettingsStore.getState().setGraphMaxNodes(maxNodes, true)
-            }
+          // Auto-adjust graphMaxNodes to match backend limit:
+          // - Lower it if it exceeds the backend limit
+          // - Raise it if backend limit increased and current value is still
+          //   at the old lower default (≤1000), to avoid truncation toast
+          const currentMaxNodes = useSettingsStore.getState().graphMaxNodes
+          if (currentMaxNodes > maxNodes) {
+            useSettingsStore.getState().setGraphMaxNodes(maxNodes, true)
+          } else if (maxNodes > currentMaxNodes && currentMaxNodes <= 1000) {
+            useSettingsStore.getState().setGraphMaxNodes(maxNodes, true)
           }
         }
       }

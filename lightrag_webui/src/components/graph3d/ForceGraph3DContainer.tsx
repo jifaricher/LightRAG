@@ -19,7 +19,6 @@ import {
   FG3D_DROP_EDGE_RADIUS,
   FG3D_DROP_RADIUS_SCALE,
   FG3D_DROP_Z_SCALE,
-  FG3D_REFIT_GROWTH_THRESHOLD,
   FG3D_CHARGE_STRENGTH,
   controlButtonVariant
 } from '@/lib/constants'
@@ -78,19 +77,9 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
   // Track whether the initial data has been fed via prop (first mount only)
   const initializedRef = useRef(false)
 
-  // Whether we're waiting for the simulation to settle before calling zoomToFit
-  const pendingZoomFitRef = useRef(false)
-
   // Whether the current run is the first load (full drop animation) vs
   // incremental (only new nodes/links animate, existing graph frozen)
   const isFirstLoadRunRef = useRef(false)
-
-  // User manually zoomed — suppresses auto-refit until ResetZoom
-  const userZoomedRef = useRef(false)
-  // Set after incremental drop; onEngineStop checks growth threshold to refit
-  const pendingIncrementalRefitRef = useRef(false)
-  // XY extent captured before the incremental drop, for growth comparison
-  const prevBboxExtentRef = useRef(0)
 
   // Reset initialization flag when graph3DData is cleared (e.g. when the
   // incremental poller starts and clears existing data for a fresh drop-in)
@@ -256,10 +245,8 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
           const extent = Math.max(bboxW, bboxH)
           spawnRadius = Math.max(extent * FG3D_DROP_RADIUS_SCALE, FG3D_DROP_EDGE_RADIUS)
           dropZ = Math.max(extent * FG3D_DROP_Z_SCALE, FG3D_DROP_INITIAL_Z)
-          prevBboxExtentRef.current = extent
         }
       }
-      pendingIncrementalRefitRef.current = true
 
       // Distribute new nodes evenly around the ring
       let angleIdx = 0
@@ -293,14 +280,10 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
         if (typeof fg.d3ReheatSimulation === 'function') {
           fg.d3ReheatSimulation()
         }
-        pendingZoomFitRef.current = true
       } else {
         // Incremental: reheat the simulation so new nodes (spawned at far Z)
         // have full energy to drop into place. Existing nodes are pinned
         // (fx/fy/fz) so they don't move — only new nodes animate.
-        // NOTE: fg.d3Force() with no args returns undefined, not the simulation.
-        // Use d3ReheatSimulation() which internally calls sim.alpha(1) and
-        // restarts the engine via engineRunning=true.
         if (typeof fg.d3ReheatSimulation === 'function') {
           fg.d3ReheatSimulation()
         }
@@ -376,37 +359,8 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
   }, [])
 
   // Called once when the d3 simulation settles.
-  // 1. First-load: consume pendingZoomFitRef → auto zoomToFit (was dead code before)
-  // 2. Incremental: if graph extent grew >15% and user hasn't manually zoomed, refit
-  // 3. Pin frozen-layout nodes' z to their settled position to prevent jitter.
+  // Pin frozen-layout nodes' z to their settled position to prevent jitter.
   const onEngineStop = useCallback(() => {
-    const fg = fgRef.current
-
-    if (pendingZoomFitRef.current) {
-      pendingZoomFitRef.current = false
-      if (fg && typeof fg.zoomToFit === 'function') {
-        fg.zoomToFit(300, 60)
-      }
-    } else if (pendingIncrementalRefitRef.current && !userZoomedRef.current) {
-      pendingIncrementalRefitRef.current = false
-      if (fg && typeof fg.getGraphBbox === 'function') {
-        const bbox = fg.getGraphBbox()
-        if (bbox) {
-          const bboxW = bbox.x[1] - bbox.x[0]
-          const bboxH = bbox.y[1] - bbox.y[0]
-          const newExtent = Math.max(bboxW, bboxH)
-          const prev = prevBboxExtentRef.current
-          if (prev > 0 && newExtent / prev > FG3D_REFIT_GROWTH_THRESHOLD) {
-            if (typeof fg.zoomToFit === 'function') {
-              fg.zoomToFit(300, 60)
-            }
-          }
-        }
-      }
-    } else {
-      pendingIncrementalRefitRef.current = false
-    }
-
     const data = useGraphStore.getState().graph3DData
     data.nodes.forEach((n: any) => {
       if (n.fx !== undefined && n.fy !== undefined && n.fz === undefined) {
@@ -420,21 +374,18 @@ const ForceGraph3DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph3DC
   // only zoomToFit and cameraPosition. We use cameraPosition to dolly
   // in/out along the z-axis.
   const handleZoomIn = useCallback(() => {
-    userZoomedRef.current = true
     const fg = fgRef.current
     if (!fg || typeof fg.cameraPosition !== 'function') return
     const cam = fg.cameraPosition()
     fg.cameraPosition({ x: cam.x, y: cam.y, z: cam.z * 0.8 }, undefined, 200)
   }, [])
   const handleZoomOut = useCallback(() => {
-    userZoomedRef.current = true
     const fg = fgRef.current
     if (!fg || typeof fg.cameraPosition !== 'function') return
     const cam = fg.cameraPosition()
     fg.cameraPosition({ x: cam.x, y: cam.y, z: cam.z * 1.2 }, undefined, 200)
   }, [])
   const handleResetZoom = useCallback(() => {
-    userZoomedRef.current = false
     fgRef.current?.zoomToFit(300, 60)
   }, [])
 
