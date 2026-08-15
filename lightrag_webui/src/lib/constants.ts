@@ -123,8 +123,8 @@ export const workerBudgetMs = (order: number): number => Math.min(1500 + order /
 // alpha_decay controls how fast the simulation loses energy and settles.
 // Lower = longer animation. velocity_decay lower = slower, gentler movement.
 // Higher values = faster convergence so entities snap in and stop quickly.
-export const FG3D_D3_ALPHA_DECAY = 0.05
-export const FG3D_D3_VELOCITY_DECAY = 0.4
+export const FG3D_D3_ALPHA_DECAY = 0.008
+export const FG3D_D3_VELOCITY_DECAY = 0.15
 export const FG3D_COOLDOWN_TICKS = 2000
 export const FG3D_NODE_REL_SIZE = 5
 export const FG3D_LINK_WIDTH = 1.5
