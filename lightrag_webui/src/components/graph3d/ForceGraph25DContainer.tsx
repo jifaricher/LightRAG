@@ -10,6 +10,7 @@ import {
   FG3D_D3_VELOCITY_DECAY,
   FG3D_COOLDOWN_TICKS,
   FG3D_NODE_REL_SIZE,
+  FG3D_LINK_WIDTH,
   FG3D_NODE_PERF_LIMIT,
   FG3D25D_FORCE_Z_STRENGTH,
   FG3D25D_DROP_INITIAL_Z,
@@ -28,9 +29,6 @@ import useIsDarkMode from '@/hooks/useIsDarkMode'
 import Button from '@/components/ui/Button'
 import { ZoomIn, ZoomOut, Maximize } from 'lucide-react'
 import * as THREE from 'three'
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js'
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js'
-import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js'
 
 interface ForceGraph25DContainerProps {
   onNodeClick?: (node: any) => void
@@ -46,47 +44,16 @@ const hexToRgb = (hex: string) => {
   }
 }
 
-// Shared material caches (shared with ForceGraph3DContainer via module scope is fine;
-// we duplicate here to keep components independent.)
-const nodeMatCache = new Map<string, THREE.MeshStandardMaterial>()
-function getNodeMaterial(colorHex: string, isHub: boolean) {
-  const key = `${colorHex}|${isHub ? 'hub' : 'n'}`
-  let mat = nodeMatCache.get(key)
-  if (mat) return mat
-  const rgb = hexToRgb(colorHex || '#ffffff')
-  mat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(1, 1, 1),
-    emissive: new THREE.Color(rgb.r, rgb.g, rgb.b),
-    emissiveIntensity: isHub ? 2.8 : 1.4,
-    metalness: 0.0,
-    roughness: 0.2,
-    transparent: true,
-    opacity: 1.0
-  })
-  nodeMatCache.set(key, mat)
-  return mat
-}
-
-const linkMatCache = new Map<string, THREE.LineBasicMaterial>()
-function getLinkMaterial(dark: boolean) {
-  const key = dark ? 'd' : 'l'
-  let mat = linkMatCache.get(key)
-  if (mat) return mat
-  mat = new THREE.LineBasicMaterial({
-    color: dark ? 0x8899bb : 0xaabbdd,
-    transparent: true,
-    opacity: 0.15,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false
-  })
-  linkMatCache.set(key, mat)
-  return mat
-}
-
 /**
- * 2.5D force-graph wrapper — same Hermes constellation/neural-net visual treatment
- * as ForceGraph3DContainer, but with a forceZ(0) constraint that pulls nodes onto
- * a flat plane so the steady state reads like a glowing 2D network.
+ * 2.5D force-graph wrapper — steady state is a flat z=0 plane (looks like 2D
+ * from the top-down camera), but new nodes drop in from z+y mixed far distance
+ * with a 3D spring animation.
+ *
+ * Key difference from ForceGraph3DContainer:
+ * - Injects d3-force-3d `forceZ(0)` to pull all nodes toward z=0 plane
+ * - New nodes spawn at z=2000 + y=-2000 (mixed-depth drop trajectory)
+ * - Existing nodes are pinned with fz=0 (locked to the plane)
+ * - Camera is positioned for a top-down view with slight perspective
  */
 const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25DContainerProps) => {
   const fgRef = useRef<any>(null)
@@ -99,18 +66,19 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
   const { t } = useTranslation()
 
   const initializedRef = useRef(false)
-  const hoverNodeRef = useRef<string | null>(null)
 
-  // Post-processing
-  const composerRef = useRef<EffectComposer | null>(null)
-  const bloomPassRef = useRef<UnrealBloomPass | null>(null)
-  const postFxSetupRef = useRef(false)
-  const origRenderRef = useRef<THREE.WebGLRenderer['render'] | null>(null)
-  const fxClockRef = useRef<THREE.Clock>(new THREE.Clock())
+  useEffect(() => {
+    if (graph3DData.nodes.length === 0) {
+      initializedRef.current = false
+    }
+  }, [graph3DData])
 
+  // Cleanup window ref on unmount
   useEffect(() => {
     return () => { delete (window as any).__forceGraph3DRef }
   }, [])
+
+  const hoverNodeRef = useRef<string | null>(null)
 
   useEffect(() => {
     const el = containerRef.current
@@ -125,58 +93,17 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
     return () => ro.disconnect()
   }, [])
 
-  const setupPostFx = useCallback(() => {
-    const fg = fgRef.current
-    if (!fg || postFxSetupRef.current) return
-    const renderer = fg.renderer?.()
-    const scene = fg.scene?.()
-    const camera = fg.camera?.()
-    if (!renderer || !scene || !camera) return
-
-    const w = renderer.domElement.clientWidth || dims.width
-    const h = renderer.domElement.clientHeight || dims.height
-
-    const composer = new EffectComposer(renderer)
-    composer.setSize(w, h)
-    composer.addPass(new RenderPass(scene, camera))
-
-    const bloom = new UnrealBloomPass(
-      new THREE.Vector2(w, h),
-      1.2,
-      0.6,
-      0.15
-    )
-    composer.addPass(bloom)
-    composerRef.current = composer
-    bloomPassRef.current = bloom
-
-    if (!origRenderRef.current) {
-      const orig = renderer.render.bind(renderer)
-      origRenderRef.current = orig
-      renderer.render = (sceneObj: THREE.Object3D, cam: THREE.Camera) => {
-        orig(sceneObj, cam)
-        composer.render(fxClockRef.current.getDelta())
-      }
-      const origSetSize = renderer.setSize.bind(renderer)
-      renderer.setSize = (w0: number, h0: number, updateStyle?: boolean) => {
-        origSetSize(w0, h0, updateStyle)
-        composer.setSize(w0, h0)
-        bloom.setSize(w0, h0)
-      }
-    }
-
-    postFxSetupRef.current = true
-  }, [dims.width, dims.height])
-
   const lightingSetupRef = useRef(false)
   const onEngineTick = useCallback(() => {
     const fg = fgRef.current
     if (!fg || typeof fg.scene !== 'function') return
 
+    // Register fg ref on window for LayoutsControl3D (once per mount)
     if (!(window as any).__forceGraph3DRef) {
       ;(window as any).__forceGraph3DRef = fg
     }
 
+    // --- One-time setup: link strength, charge, forceZ, lighting ---
     if (!lightingSetupRef.current) {
       const forceLink0 = fg.d3Force('link')
       if (forceLink0) {
@@ -189,21 +116,29 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
         forceCharge.strength(FG3D25D_CHARGE_STRENGTH)
       }
 
+      // === 2.5D key: inject forceZ to pull all nodes toward z=0 plane ===
       fg.d3Force('z', forceZ(0).strength(FG3D25D_FORCE_Z_STRENGTH))
 
       const scene = fg.scene()
       if (scene) {
-        scene.add(new THREE.AmbientLight(0xaabbff, 0.45))
-        const key = new THREE.PointLight(0xffffff, 0.6, 0, 2)
-        key.position.set(0, 0, 500)
-        scene.add(key)
+        const ambient = new THREE.AmbientLight(isDarkMode ? 0x404060 : 0xffffff, isDarkMode ? 0.6 : 0.8)
+        scene.add(ambient)
+
+        const dirLight = new THREE.DirectionalLight(isDarkMode ? 0x8899ff : 0xffffff, isDarkMode ? 0.8 : 0.6)
+        dirLight.position.set(200, 300, 200)
+        scene.add(dirLight)
+
+        const pointLight = new THREE.PointLight(isDarkMode ? 0x6688ff : 0xffffff, isDarkMode ? 0.5 : 0.3)
+        pointLight.position.set(0, 0, 300)
+        scene.add(pointLight)
       }
 
       lightingSetupRef.current = true
     }
 
-    setupPostFx()
-
+    // --- Every tick: shrink link distance as simulation converges ---
+    // Per-edge target distance scales with edge weight: high-weight edges
+    // settle short, low-weight edges settle long — like 2D ForceAtlas2.
     const forceLink = fg.d3Force('link')
     if (forceLink) {
       const alpha = typeof forceLink.alpha === 'function' ? forceLink.alpha() : 1
@@ -216,14 +151,10 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
         return startDist * (1 - t) + targetDist * t
       })
     }
-  }, [setupPostFx])
+  }, [isDarkMode])
 
-  useEffect(() => {
-    if (graph3DData.nodes.length === 0) {
-      initializedRef.current = false
-    }
-  }, [graph3DData])
-
+  // Drop-spring animation: new nodes drill into screen from far z (toward
+  // viewer) into the z=0 plane. Existing nodes are pinned with fz=0.
   useEffect(() => {
     const currentData = useGraphStore.getState().graph3DData
     if (currentData.nodes.length === 0) return
@@ -231,12 +162,17 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
     const isFirstLoad = !initializedRef.current
 
     if (isFirstLoad) {
+      // First load: all nodes drill in from far z
       currentData.nodes.forEach((n: any) => {
         n.z = FG3D25D_DROP_INITIAL_Z
         n.vz = FG3D25D_DROP_INITIAL_VZ
       })
       initializedRef.current = true
     } else {
+      // Incremental: pin existing nodes (XY locked, z forced to 0 plane)
+      // New nodes spawn on a ring around the graph centroid (outer edge)
+      // at far Z, then get pulled inward by the link spring — "converge
+      // from edge to center" effect.
       let cx = 0, cy = 0, count = 0
       for (const n of currentData.nodes) {
         if (n.x !== undefined && n.y !== undefined) {
@@ -247,6 +183,9 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
       }
       if (count > 0) { cx /= count; cy /= count }
 
+      // Adaptive spawn/drop geometry: scale to the graph's actual bounding
+      // box so new nodes always appear outside the existing graph and the
+      // drop distance stays proportionally visible as the graph grows.
       const fg = fgRef.current
       let spawnRadius = FG3D25D_DROP_EDGE_RADIUS
       let dropZ = FG3D25D_DROP_INITIAL_Z
@@ -264,6 +203,7 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
       let angleIdx = 0
       currentData.nodes.forEach((n: any) => {
         if (n.x !== undefined && n.y !== undefined) {
+          // Existing node: pin XY, force z=0 plane
           n.fx = n.x
           n.fy = n.y
           n.fz = 0
@@ -271,7 +211,8 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
           n.vy = 0
           n.vz = 0
         } else {
-          const angle = (angleIdx * 137.5) * Math.PI / 180
+          // New node: spawn on outer ring around centroid, far Z for drop
+          const angle = (angleIdx * 137.5) * Math.PI / 180 // golden angle for even spread
           angleIdx++
           n.x = cx + spawnRadius * Math.cos(angle)
           n.y = cy + spawnRadius * Math.sin(angle)
@@ -285,61 +226,72 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
 
     const fg = fgRef.current
     if (fg) {
-      if (typeof fg.d3ReheatSimulation === 'function') {
-        fg.d3ReheatSimulation()
+      if (isFirstLoad) {
+        if (typeof fg.d3ReheatSimulation === 'function') {
+          fg.d3ReheatSimulation()
+        }
+      } else {
+        // Incremental: reheat the simulation so new nodes (spawned at far Z)
+        // have full energy to drop into place. Existing nodes are pinned
+        // (fx/fy/fz) so they don't move — only new nodes animate.
+        if (typeof fg.d3ReheatSimulation === 'function') {
+          fg.d3ReheatSimulation()
+        }
       }
     }
   }, [graph3DData])
 
   const nodeThreeObject = useCallback(
     (node: any) => {
-      if (!show3DNodeLabel) return hiddenGroup()
+      if (!show3DNodeLabel) return undefined
       const showLabels = graph3DData.nodes.length <= FG3D_NODE_PERF_LIMIT
-      if (!showLabels) return hiddenGroup()
-      if ((node.val ?? 1) < 8) return hiddenGroup()
+      if (!showLabels) return undefined
+      if (node.val < 5) return undefined
+
       const group = new THREE.Group()
       const label = node.label || node.name || node.id
-      const sprite = new SpriteText(label, 12, '#ffffff')
-      sprite.textHeight = 6
-      sprite.padding = 2
-      sprite.backgroundColor = 'rgba(0,0,0,0.55)'
-      sprite.borderRadius = 2
-      sprite.position.y = 6
+      const sprite = new SpriteText(label, 14, isDarkMode ? '#e0e0ff' : '#1a1a2e')
+      sprite.textHeight = 8
+      sprite.padding = 3
+      sprite.backgroundColor = isDarkMode ? 'rgba(10,10,30,0.7)' : 'rgba(255,255,255,0.7)'
+      sprite.borderColor = isDarkMode ? 'rgba(100,120,200,0.3)' : 'rgba(100,120,200,0.3)'
+      sprite.borderWidth = 1
+      sprite.position.y = 8
       group.add(sprite)
       return group
     },
-    [graph3DData.nodes.length, show3DNodeLabel]
+    [graph3DData.nodes.length, isDarkMode, show3DNodeLabel]
   )
 
   const nodeMaterial = useCallback((node: any) => {
-    const isHub = (node.val ?? 1) >= 8
-    return getNodeMaterial(node.color || '#ffffff', isHub)
+    const rgb = hexToRgb(node.color || '#4488ff')
+    const mat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(rgb.r, rgb.g, rgb.b),
+      emissive: new THREE.Color(rgb.r * 0.3, rgb.g * 0.3, rgb.b * 0.3),
+      emissiveIntensity: 0.4,
+      metalness: 0.3,
+      roughness: 0.5,
+      transparent: true,
+      opacity: 0.92
+    })
+    return mat
   }, [])
 
-  const nodeVal = useCallback((node: any) => {
-    const v = node.val ?? 1
-    if (v >= 10) return v * 1.6
-    if (v >= 5) return v * 1.2
-    return v * 0.7
-  }, [])
-
-  // Hidden placeholder group returned when we don't want a label attached
-  const hiddenGroupRef = useRef<THREE.Group | null>(null)
-  const hiddenGroup = () => {
-    if (!hiddenGroupRef.current) {
-      const g = new THREE.Group()
-      g.visible = false
-      hiddenGroupRef.current = g
-    }
-    return hiddenGroupRef.current
-  }
-
-  const linkMaterial = useCallback(() => getLinkMaterial(isDarkMode), [isDarkMode])
+  const linkMaterial = useCallback(() => {
+    const mat = new THREE.LineBasicMaterial({
+      color: isDarkMode ? 0x4a6fa5 : 0x8899bb,
+      transparent: true,
+      opacity: 0.5
+    })
+    return mat
+  }, [isDarkMode])
 
   const handleNodeHover = useCallback((node: any) => {
     hoverNodeRef.current = node?.id ?? null
   }, [])
 
+  // Called once when the d3 simulation settles.
+  // Pin all nodes' z to 0 so frozen layouts don't jitter on the Z axis.
   const onEngineStop = useCallback(() => {
     const data = useGraphStore.getState().graph3DData
     data.nodes.forEach((n: any) => {
@@ -367,42 +319,25 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
     fgRef.current?.zoomToFit(300, 60)
   }, [])
 
-  useEffect(() => {
-    return () => {
-      const fg = fgRef.current
-      if (fg && origRenderRef.current) {
-        const renderer = fg.renderer?.()
-        if (renderer) renderer.render = origRenderRef.current
-        origRenderRef.current = null
-      }
-      if (composerRef.current) {
-        composerRef.current.dispose()
-        composerRef.current = null
-      }
-      postFxSetupRef.current = false
-      bloomPassRef.current = null
-    }
-  }, [])
-
-  const FG3D = ForceGraph3D as any
-
   return (
     <div ref={containerRef} className="relative h-full w-full overflow-hidden">
-      <FG3D
+      <ForceGraph3D
         ref={fgRef}
         graphData={graph3DData}
-        backgroundColor="#000008"
-        nodeColor={() => '#ffffff'}
-        nodeRelSize={FG3D_NODE_REL_SIZE * 0.7}
-        nodeVal={nodeVal}
+        backgroundColor={isDarkMode ? '#080812' : '#f0f2f8'}
+        nodeColor={(node: any) => node.color}
+        nodeRelSize={FG3D_NODE_REL_SIZE}
+        nodeVal={(node: any) => node.val}
         nodeLabel={(node: any) => node.label || node.name || node.id}
         nodeMaterial={nodeMaterial}
         nodeThreeObject={nodeThreeObject}
         nodeThreeObjectExtend={true}
-        nodeOpacity={1}
-        linkColor={() => (isDarkMode ? '#6688bb' : '#99bbff')}
-        linkWidth={0.3}
-        linkDirectionalParticles={0}
+        nodeOpacity={0.92}
+        linkColor={() => (isDarkMode ? '#4a6fa5' : '#8899bb')}
+        linkWidth={FG3D_LINK_WIDTH}
+        linkDirectionalParticles={2}
+        linkDirectionalParticleWidth={0.4}
+        linkDirectionalParticleSpeed={0.004}
         linkMaterial={linkMaterial}
         linkLabel={(link: any) => link.label || ''}
         linkCurvature={0}
@@ -416,13 +351,13 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
         onBackgroundClick={onBackgroundClick}
         width={dims.width}
         height={dims.height}
-        pixelRatio={Math.min(typeof window !== 'undefined' ? window.devicePixelRatio : 1, 2)}
+        pixelRatio={typeof window !== 'undefined' ? window.devicePixelRatio : 1}
         cameraPosition={FG3D25D_CAMERA_POSITION}
         enableNodeDrag={true}
         showNavHint={false}
       />
 
-      {/* Zoom controls — bottom-left */}
+      {/* Zoom controls — bottom-left, matching 2D layout */}
       <div className="bg-background/60 absolute bottom-2 left-2 flex flex-col rounded-xl border-2 backdrop-blur-lg">
         <Button
           variant={controlButtonVariant}
@@ -450,6 +385,7 @@ const ForceGraph25DContainer = ({ onNodeClick, onBackgroundClick }: ForceGraph25
         </Button>
       </div>
 
+      {/* Build-in-progress indicator */}
       {isIncrementalBuilding && (
         <div className="bg-background/80 absolute top-2 right-2 rounded-lg border-2 px-3 py-1.5 backdrop-blur-lg">
           <span className="flex items-center gap-2 text-xs">
